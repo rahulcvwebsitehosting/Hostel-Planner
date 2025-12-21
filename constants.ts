@@ -62,6 +62,22 @@ export const FURNITURE_DATA: Record<string, FurnitureDefinition> = {
     color: '#1e293b',
     maxQuantity: 99,
   },
+  TOILET: {
+    id: 'TOILET',
+    name: 'Western Toilet',
+    icon: '🚽',
+    dimensions: { width: 0.4, depth: 0.7, height: 0.8 },
+    color: '#ffffff',
+    maxQuantity: 2,
+  },
+  WASHBASIN: {
+    id: 'WASHBASIN',
+    name: 'Washbasin',
+    icon: '🚰',
+    dimensions: { width: 0.5, depth: 0.4, height: 0.85 },
+    color: '#f8fafc',
+    maxQuantity: 4,
+  },
   SHOWER: {
     id: 'SHOWER',
     name: 'Shower Enclosure',
