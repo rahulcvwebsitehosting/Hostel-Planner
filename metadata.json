@@ -1,0 +1,5 @@
+{
+  "name": "Hostel3D - Interactive Room Planner",
+  "description": "A professional 3D tool for students to virtually arrange furniture in their hostel rooms with drag-and-drop mechanics, rotation, and layout saving.",
+  "requestFramePermissions": []
+}
