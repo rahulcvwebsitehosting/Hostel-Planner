@@ -17,6 +17,14 @@
         touch-action: none;
       }
     </style>
+    <script>
+      // Shim process for libraries that expect it (like React or Three.js) in the browser
+      window.process = { 
+        env: { 
+          NODE_ENV: 'production'
+        } 
+      };
+    </script>
   <script type="importmap">
 {
   "imports": {
@@ -34,5 +42,7 @@
 </head>
   <body>
     <div id="root"></div>
+    <!-- Explicitly import the index.tsx module as the entry point -->
+    <script type="module" src="index.tsx"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 
 import React from 'react';
-import { FurnitureType } from '../types';
-import { FURNITURE_DATA } from '../constants';
+import { FurnitureType } from '../types.ts';
+import { FURNITURE_DATA } from '../constants.ts';
 
 interface ModelProps {
   type: FurnitureType;

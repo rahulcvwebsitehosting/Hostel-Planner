@@ -4,14 +4,27 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, PerspectiveCamera, ContactShadows, Environment, AdaptiveDpr, AdaptiveEvents, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { GoogleGenAI, Type } from "@google/genai";
-import { INITIAL_ROOM, FURNITURE_DATA, GRID_SIZE, THEMES } from './constants';
-import { FurnitureType, PlacedItem, AppState, RoomConfig, AppMode } from './types';
-import { FurnitureModel } from './components/FurnitureModels';
-import { Plus, Trash2, Save, Grid3X3, Layers, Maximize, RotateCw, Palette, Home, MousePointer2, AlertTriangle, Eye, Footprints, Settings2, Move, Sparkles, Loader2, Maximize2, Minus, ChevronDown, ChevronUp, LayoutGrid } from 'lucide-react';
+import { INITIAL_ROOM, FURNITURE_DATA, GRID_SIZE, THEMES } from './constants.ts';
+import { FurnitureType, PlacedItem, AppState, RoomConfig, AppMode } from './types.ts';
+import { FurnitureModel } from './components/FurnitureModels.tsx';
+import { Plus, Trash2, Save, Grid3X3, Layers, Maximize, RotateCw, Palette, Home, MousePointer2, AlertTriangle, Eye, Footprints, Settings2, Move, Sparkles, Loader2, Maximize2, Minus, ChevronDown, ChevronUp, LayoutGrid, MessageSquare, Send, X, Bot, Wand2 } from 'lucide-react';
 
-const LOCAL_STORAGE_KEY = 'hostel_planner_v16_pro';
+const LOCAL_STORAGE_KEY = 'hostel_planner_v18_final_polish';
 const Y_EPSILON = 0.002; 
 const generateId = () => Math.random().toString(36).substr(2, 9);
+
+interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
+const QUICK_ACTIONS = [
+  "Arrange for 2 students",
+  "Maximize floor space",
+  "Study-focused layout",
+  "Symmetric arrangement",
+  "Move beds to the corners"
+];
 
 interface DraggableProps {
   item: PlacedItem;
@@ -217,14 +230,14 @@ export default function App() {
   const [joystickVector, setJoystickVector] = useState({ x: 0, y: 0 });
   const [isAutoPlanning, setIsAutoPlanning] = useState(false);
   const [showPOVOverlay, setShowPOVOverlay] = useState(true);
-  const [showAiSettings, setShowAiSettings] = useState(false);
   
-  const [layoutTargets, setLayoutTargets] = useState<Record<FurnitureType, number>>({
-    BUNKER_BED: 2,
-    STUDY_TABLE: 2,
-    BERO: 2,
-    CHAIR: 2,
-  });
+  // Chatbot states
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { role: 'model', text: "Hello! I'm your AI Interior Architect. I can help you optimize this space for living and studying. What are you looking to achieve today?" }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -238,6 +251,10 @@ export default function App() {
       } catch (e) { console.error("Load failed", e); }
     }
   }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   const getEffectiveDims = useCallback((type: FurnitureType, rotation: number) => {
     const itemData = FURNITURE_DATA[type];
@@ -286,7 +303,6 @@ export default function App() {
     if (w === 0) return pos;
     const roomWidth = 7.30, roomDepth = 3.53, wallClearance = 0.05;
     
-    // Living area is central floor. Bathroom starts at Z < -1.765. Entrance at Z > 1.765.
     const limitX = (roomWidth / 2) - (w / 2) - wallClearance;
     const limitZ = (roomDepth / 2) - (d / 2) - wallClearance;
 
@@ -295,6 +311,90 @@ export default function App() {
     
     return [targetX, 0, targetZ];
   }, [getEffectiveDims]);
+
+  const processAIChat = async (userMsg: string) => {
+    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setIsAutoPlanning(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      
+      const currentLayoutStr = JSON.stringify(state.placedItems.map(i => ({
+        type: i.type,
+        position: i.position,
+        rotation: i.rotation
+      })));
+
+      const furnitureMetadata = JSON.stringify(Object.values(FURNITURE_DATA).map(f => ({
+        id: f.id,
+        w: f.dimensions.width,
+        d: f.dimensions.depth
+      })));
+
+      const prompt = `You are a professional Interior Architect.
+ROOM: 7.3m Wide x 3.53m Deep.
+Z-LIMITS: |Z| < 1.76 (Z < -1.76 is Bathroom).
+FURNITURE DIMS: ${furnitureMetadata}
+
+CURRENT STATE: ${currentLayoutStr}
+USER REQUEST: "${userMsg}"
+
+TASK:
+1. Provide professional design advice in <text> tags.
+2. Provide a FULL NEW ARRAY of furniture in <json> tags if a layout change is requested. Use instanceId as generateId() style on your end or simply omit for me to handle.
+3. Ensure chairs face tables (0.5m offset).
+4. Maintain walking paths.
+
+FORMAT:
+<text>Architectural feedback...</text>
+<json>[{"type": "FURNITURE_ID", "position": [x, 0, z], "rotation": r}, ...]</json>`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-pro-preview",
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingBudget: 8192 },
+        }
+      });
+      
+      const rawText = response.text || '';
+      const textMatch = rawText.match(/<text>([\s\S]*?)<\/text>/);
+      const aiText = textMatch ? textMatch[1].trim() : rawText.replace(/<json>[\s\S]*?<\/json>/, '').trim();
+      setChatMessages(prev => [...prev, { role: 'model', text: aiText }]);
+
+      const jsonMatch = rawText.match(/<json>([\s\S]*?)<\/json>/);
+      if (jsonMatch) {
+        try {
+          const items = JSON.parse(jsonMatch[1].trim());
+          const validTypes = Object.keys(FURNITURE_DATA);
+          const placedItems: PlacedItem[] = items
+            .filter((item: any) => validTypes.includes(item.type))
+            .map((item: any) => ({
+              instanceId: generateId(),
+              type: item.type as FurnitureType,
+              position: clampPosition(item.position, item.type as FurnitureType, item.rotation),
+              rotation: item.rotation
+            }));
+          setState(prev => ({ ...prev, placedItems, selectedId: null }));
+        } catch (e) {
+          console.error("Layout JSON error:", e);
+        }
+      }
+    } catch (error: any) {
+      console.error("AI Architect error:", error);
+      setChatMessages(prev => [...prev, { role: 'model', text: "I've hit a spatial reasoning limit. Could you rephrase or try a simpler request?" }]);
+    } finally {
+      setIsAutoPlanning(false);
+    }
+  };
+
+  const handleChatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isAutoPlanning) return;
+    const msg = chatInput;
+    setChatInput('');
+    processAIChat(msg);
+  };
 
   const addItem = (type: FurnitureType) => {
     if (state.mode !== 'edit' || !FURNITURE_DATA[type]) return;
@@ -338,98 +438,6 @@ export default function App() {
     }));
   }, [state.placedItems, clampPosition, state.mode]);
 
-  const handleAutoPlan = async () => {
-    setIsAutoPlanning(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-      const prompt = `Task: Professional Hostel Layout Design.
-ROOM DIMENSIONS: 7.30m Wide (X-axis) x 3.53m Deep (Z-axis).
-COORDINATE RANGE (LIVING AREA):
-- X: [-3.60, 3.60] (Stay away from absolute edges by 0.05m)
-- Z: [-1.70, 1.70] (STRICT: Never place where Z < -1.75 as it is the Bathroom)
-
-FURNITURE QUANTITIES:
-- BUNKER_BED (0.85m x 1.93m): ${layoutTargets.BUNKER_BED}
-- STUDY_TABLE (0.79m x 0.45m): ${layoutTargets.STUDY_TABLE}
-- BERO (1.06m x 0.51m): ${layoutTargets.BERO}
-- CHAIR (0.45m x 0.45m): ${layoutTargets.CHAIR}
-
-SPATIAL RULES:
-1. BEDS: MUST be parallel to side walls (Rotation 0 or PI). Preferred at X=+/- 3.2.
-2. TABLES: Preferred against back wall (Z ~ -1.3). Ensure enough space behind them for chairs.
-3. CHAIRS: MUST be paired with a STUDY_TABLE. If Table is at [x, 0, z], place Chair at [x, 0, z+0.5] facing the table.
-4. BEROS: Place near the entrance (+Z area, Z ~ 1.2).
-5. CIRCULATION: Maintain a 1.2m wide clear walking path from the entrance (Z=1.7, X=0) to the window/back wall.
-6. OVERLAP: DO NOT let any furniture bounding boxes overlap.
-
-Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation": number }.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-pro-preview",
-        contents: prompt,
-        config: {
-          thinkingConfig: { thinkingBudget: 32768 },
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                type: { type: Type.STRING },
-                position: { type: Type.ARRAY, items: { type: Type.NUMBER } },
-                rotation: { type: Type.NUMBER }
-              },
-              required: ["type", "position", "rotation"]
-            }
-          }
-        }
-      });
-      
-      const items = JSON.parse(response.text || '[]');
-      const validTypes = Object.keys(FURNITURE_DATA);
-      
-      const placedItems: PlacedItem[] = items
-        .filter((item: any) => validTypes.includes(item.type))
-        .map((item: any) => {
-          const rawPos = item.position as [number, number, number];
-          const clamped = clampPosition(rawPos, item.type as FurnitureType, item.rotation);
-          return {
-            instanceId: generateId(),
-            type: item.type as FurnitureType,
-            position: clamped,
-            rotation: item.rotation
-          };
-        });
-        
-      setState(prev => ({ ...prev, placedItems, selectedId: null }));
-    } catch (error: any) {
-      console.error("AI Planning failed:", error);
-      alert("AI layout error. Using standard arrangement.");
-      applyStandardLayout();
-    } finally { setIsAutoPlanning(false); }
-  };
-
-  const applyStandardLayout = () => {
-    const fallback: PlacedItem[] = [
-      { instanceId: generateId(), type: 'BUNKER_BED', position: [-3.2, 0, 0], rotation: 0 },
-      { instanceId: generateId(), type: 'BUNKER_BED', position: [3.2, 0, 0], rotation: 0 },
-      { instanceId: generateId(), type: 'STUDY_TABLE', position: [-1.2, 0, -1.3], rotation: 0 },
-      { instanceId: generateId(), type: 'STUDY_TABLE', position: [1.2, 0, -1.3], rotation: 0 },
-      { instanceId: generateId(), type: 'CHAIR', position: [-1.2, 0, -0.8], rotation: 0 },
-      { instanceId: generateId(), type: 'CHAIR', position: [1.2, 0, -0.8], rotation: 0 },
-      { instanceId: generateId(), type: 'BERO', position: [-2.5, 0, 1.3], rotation: 0 },
-      { instanceId: generateId(), type: 'BERO', position: [2.5, 0, 1.3], rotation: 0 },
-    ];
-    setState(prev => ({ ...prev, placedItems: fallback, selectedId: null }));
-  };
-
-  const updateTarget = (type: FurnitureType, delta: number) => {
-    setLayoutTargets(prev => ({
-      ...prev,
-      [type]: Math.max(0, Math.min(6, prev[type] + delta))
-    }));
-  };
-
   const enterPOV = () => {
     const canvas = document.querySelector('canvas');
     if (canvas) { try { canvas.requestPointerLock(); } catch (e) {} }
@@ -439,12 +447,14 @@ Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation"
   return (
     <div className="flex h-screen bg-neutral-950 flex-col md:flex-row overflow-hidden font-sans select-none text-white">
       {isAutoPlanning && (
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center text-white text-center p-6">
-          <Loader2 size={64} className="animate-spin text-blue-500 mb-6" />
-          <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Architectural Logic Initializing</h2>
-          <p className="text-white/40 text-xs uppercase tracking-[0.3em] max-w-sm">Applying ergonomic constraints and circulation path optimization...</p>
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-xl flex flex-col items-center justify-center text-center p-6">
+          <Loader2 size={56} className="animate-spin text-blue-500 mb-8" />
+          <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Calculating Spatial Solutions</h2>
+          <p className="text-white/40 text-[10px] uppercase tracking-[0.4em]">Optimizing ergonomics & circulation...</p>
         </div>
       )}
+
+      {/* Main Sidebar */}
       <aside className={`w-full md:w-80 bg-white border-r border-neutral-200 flex flex-col z-20 shadow-2xl transition-transform duration-500 ${state.mode !== 'edit' ? '-translate-x-full md:absolute' : 'translate-x-0'}`}>
         <div className="p-6 border-b border-neutral-100 flex items-center gap-3 bg-neutral-50">
           <div className="p-2 bg-blue-600 rounded-lg text-white shadow-lg shadow-blue-500/30"><Home size={20}/></div>
@@ -453,51 +463,24 @@ Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation"
             <p className="text-[10px] text-neutral-500 font-black uppercase mt-1 tracking-widest">Architect Studio</p>
           </div>
         </div>
-        <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-          <section className="bg-neutral-900 rounded-2xl p-4 shadow-xl border border-white/5">
-             <div className="flex items-center justify-between mb-4">
-                <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2"><Sparkles size={12}/> AI Layout Config</h2>
-                <button onClick={() => setShowAiSettings(!showAiSettings)} className="text-white/40 hover:text-white transition-colors">
-                  {showAiSettings ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
-                </button>
+        <div className="p-6 space-y-6 flex-1 overflow-y-auto text-neutral-800">
+          <section className="bg-neutral-900 rounded-2xl p-5 shadow-xl border border-white/5 text-white">
+             <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2"><Sparkles size={12}/> AI ARCHITECT</h2>
              </div>
-             
-             {showAiSettings && (
-               <div className="space-y-3 mb-4 border-b border-white/10 pb-4 animate-in fade-in slide-in-from-top-2">
-                 {(Object.keys(FURNITURE_DATA) as FurnitureType[]).map(type => (
-                   <div key={type} className="flex items-center justify-between">
-                     <span className="text-[10px] font-bold text-white/60">{FURNITURE_DATA[type].name}</span>
-                     <div className="flex items-center gap-3">
-                        <button onClick={() => updateTarget(type, -1)} className="p-1 rounded bg-white/10 hover:bg-white/20"><Minus size={10}/></button>
-                        <span className="text-xs font-black min-w-[12px] text-center">{layoutTargets[type]}</span>
-                        <button onClick={() => updateTarget(type, 1)} className="p-1 rounded bg-white/10 hover:bg-white/20"><Plus size={10}/></button>
-                     </div>
-                   </div>
-                 ))}
-                 <button onClick={() => setLayoutTargets({ BUNKER_BED: 2, STUDY_TABLE: 2, BERO: 2, CHAIR: 2 })} className="w-full py-1.5 text-[10px] font-black text-white/40 hover:text-white transition-colors uppercase">Reset Targets</button>
-               </div>
-             )}
-
-             <button onClick={handleAutoPlan} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-all active:scale-95 text-xs shadow-lg shadow-blue-500/20">
-               <Sparkles size={16} /> GENERATE PLAN
+             <p className="text-[11px] text-white/40 mb-4 leading-relaxed">Let the architect handle the placement for you.</p>
+             <button onClick={() => setIsChatOpen(true)} className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-all active:scale-95 text-xs shadow-lg shadow-blue-500/20">
+               <MessageSquare size={16} /> START CONSULTING
              </button>
           </section>
 
           <section>
-             <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><LayoutGrid size={12}/> Layout Presets</h2>
-             <div className="grid grid-cols-2 gap-2">
-                <button onClick={applyStandardLayout} className="py-2 text-[10px] font-black uppercase rounded-lg border-2 border-neutral-100 hover:border-blue-500 transition-colors text-neutral-600">Standard 2P</button>
-                <button onClick={() => setState(p => ({ ...p, placedItems: [] }))} className="py-2 text-[10px] font-black uppercase rounded-lg border-2 border-neutral-100 hover:border-red-500 transition-colors text-neutral-600">Clear Room</button>
-             </div>
-          </section>
-
-          <section>
-            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12}/> Visual Style</h2>
+            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12}/> Environmental Style</h2>
             <div className="flex gap-2">{Object.entries(THEMES).map(([key, t]) => (<button key={key} onClick={() => setTheme(t)} className={`flex-1 h-10 rounded-lg border-2 transition-all ${theme === t ? 'border-blue-500 scale-95 shadow-inner' : 'border-neutral-200'}`} style={{ backgroundColor: t.floor }} />))}</div>
           </section>
 
           <section>
-            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3">Add Elements</h2>
+            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3">Components</h2>
             <div className="grid grid-cols-1 gap-2">
               {(Object.keys(FURNITURE_DATA) as FurnitureType[]).map(type => {
                 const item = FURNITURE_DATA[type];
@@ -528,24 +511,117 @@ Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation"
           <button onClick={() => { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); alert("Spatial arrangement saved!"); }} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl transition-all">Save Project</button>
         </div>
       </aside>
+
+      {/* 3D Scene */}
       <main className="flex-1 relative">
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex bg-neutral-900/40 backdrop-blur-2xl rounded-2xl p-1 shadow-2xl border border-white/10">
-          <button onClick={() => setState(p => ({ ...p, mode: 'edit' }))} className={`px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-bold transition-all ${state.mode === 'edit' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-white'}`}><Settings2 size={14} /> EDIT</button>
-          <button onClick={() => setState(p => ({ ...p, mode: 'view' }))} className={`px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-bold transition-all ${state.mode === 'view' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-white'}`}><Eye size={14} /> VIEW</button>
-          <button onClick={() => setState(p => ({ ...p, mode: 'pov' }))} className={`px-4 py-2 rounded-xl flex items-center gap-2 text-xs font-bold transition-all ${state.mode === 'pov' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-white'}`}><Footprints size={14} /> POV</button>
+        {/* Chat Sidebar Overlay */}
+        <div className={`absolute right-0 top-0 bottom-0 w-full md:w-96 bg-neutral-900/95 backdrop-blur-3xl z-50 border-l border-white/10 flex flex-col transition-all duration-500 ease-in-out ${isChatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
+          <div className="p-6 border-b border-white/10 flex items-center justify-between bg-neutral-900/40">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-500/20"><Bot size={22}/></div>
+              <div>
+                <h3 className="font-bold text-sm tracking-tight text-white">Architectural AI</h3>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"/>
+                  <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">Cognitive Core Active</span>
+                </div>
+              </div>
+            </div>
+            <button onClick={() => setIsChatOpen(false)} className="p-2 hover:bg-white/10 rounded-lg transition-colors"><X size={20}/></button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                <div className={`max-w-[85%] p-4 rounded-2xl text-[13px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/5 border border-white/10 text-white/90 rounded-tl-none backdrop-blur-md'}`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            {isAutoPlanning && (
+              <div className="flex justify-start">
+                <div className="bg-white/5 border border-white/10 rounded-2xl rounded-tl-none p-4 backdrop-blur-md">
+                   <div className="flex gap-1.5">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" />
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce delay-100" />
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce delay-200" />
+                   </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          <div className="p-6 bg-black/40 border-t border-white/10 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {QUICK_ACTIONS.map((action) => (
+                <button 
+                  key={action} 
+                  onClick={() => processAIChat(action)}
+                  className="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-[10px] font-bold text-white/60 hover:bg-white/10 hover:text-white transition-all active:scale-95 whitespace-nowrap"
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleChatSubmit} className="relative">
+              <input 
+                type="text" 
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Message your architect..."
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 pr-14 text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-white/20 shadow-inner"
+              />
+              <button 
+                type="submit" 
+                disabled={!chatInput.trim() || isAutoPlanning}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-blue-600 rounded-xl hover:bg-blue-500 transition-all disabled:opacity-50 disabled:scale-95 shadow-lg shadow-blue-500/20"
+              >
+                {isAutoPlanning ? <Loader2 className="animate-spin" size={18}/> : <Send size={18}/>}
+              </button>
+            </form>
+          </div>
         </div>
+
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex bg-neutral-900/60 backdrop-blur-2xl rounded-2xl p-1 shadow-2xl border border-white/10">
+          <button onClick={() => setState(p => ({ ...p, mode: 'edit' }))} className={`px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs font-black transition-all ${state.mode === 'edit' ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/10 text-white'}`}><Settings2 size={14} /> DRAFT</button>
+          <button onClick={() => setState(p => ({ ...p, mode: 'view' }))} className={`px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs font-black transition-all ${state.mode === 'view' ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/10 text-white'}`}><Eye size={14} /> RENDER</button>
+          <button onClick={() => setState(p => ({ ...p, mode: 'pov' }))} className={`px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs font-black transition-all ${state.mode === 'pov' ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/10 text-white'}`}><Footprints size={14} /> WALK</button>
+        </div>
+
         {state.mode === 'pov' && (
           <>
-            {showPOVOverlay && (<div onClick={enterPOV} className="absolute inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center cursor-pointer group"><div className="text-center bg-white/10 p-12 rounded-[3rem] border border-white/20 shadow-2xl group-hover:scale-105 transition-transform"><Maximize2 size={64} className="mx-auto text-blue-400 mb-4 animate-pulse" /><h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Click to Explore</h2><p className="text-white/60 text-sm max-w-xs mx-auto">Click anywhere to enter the room. Drag to look around.</p></div></div>)}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 z-40 pointer-events-none opacity-40"><div className="absolute top-1/2 left-0 w-4 h-[1px] bg-white" /><div className="absolute left-1/2 top-0 w-[1px] h-4 bg-white" /></div>
+            {showPOVOverlay && (
+              <div onClick={enterPOV} className="absolute inset-0 z-[70] bg-black/70 backdrop-blur-md flex items-center justify-center cursor-pointer group">
+                <div className="text-center bg-white/10 p-16 rounded-[4rem] border border-white/20 shadow-2xl group-hover:scale-105 transition-all duration-500">
+                  <Maximize2 size={80} className="mx-auto text-blue-400 mb-6 animate-pulse" />
+                  <h2 className="text-3xl font-black uppercase tracking-tighter mb-2 text-white">Enter Space</h2>
+                  <p className="text-white/40 text-sm font-medium tracking-widest uppercase">Click to Walkthrough</p>
+                </div>
+              </div>
+            )}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 z-40 pointer-events-none opacity-40">
+              <div className="absolute top-1/2 left-0 w-full h-[1.5px] bg-white shadow-sm" />
+              <div className="absolute left-1/2 top-0 w-[1.5px] h-full bg-white shadow-sm" />
+            </div>
             <Joystick onMove={setJoystickVector} />
-            <div className="absolute bottom-10 right-10 z-50 bg-black/40 backdrop-blur-md px-4 py-2 rounded-xl text-[10px] font-bold text-white/50 border border-white/10 tracking-widest uppercase">WASD: Walk • Space/Shift: Fly</div>
           </>
         )}
-        <div className="absolute top-6 right-6 z-50 flex flex-col space-y-2">
+
+        <div className="absolute top-6 right-6 z-40 flex flex-col space-y-3">
+          {!isChatOpen && (
+            <button 
+              onClick={() => setIsChatOpen(true)} 
+              className="p-4 bg-blue-600 text-white rounded-2xl shadow-2xl hover:scale-110 transition-all animate-bounce flex flex-col items-center gap-1 group"
+            >
+              <MessageSquare size={24}/>
+              <span className="text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Chat</span>
+            </button>
+          )}
           {state.mode === 'edit' && (<button onClick={() => setState(p => ({ ...p, showGrid: !p.showGrid }))} className={`p-4 rounded-2xl shadow-2xl transition-all border-2 ${state.showGrid ? 'bg-blue-600 border-blue-400 text-white' : 'bg-white border-neutral-200 text-neutral-400'}`}><Grid3X3 size={24}/></button>)}
           <button onClick={() => setState(p => ({ ...p, is2D: !p.is2D }))} className={`p-4 rounded-2xl shadow-2xl transition-all border-2 ${state.is2D ? 'bg-blue-600 border-blue-400 text-white' : 'bg-white border-neutral-200 text-neutral-400'}`}>{state.is2D ? <Maximize size={24}/> : <Layers size={24}/>}</button>
         </div>
+
         <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}>
           <AdaptiveDpr pixelated /><AdaptiveEvents />
           {state.mode === 'pov' ? (<><PerspectiveCamera makeDefault position={[0, 1.6, 2.5]} fov={65} /><POVControls joystickVector={joystickVector} /></>) : (<><PerspectiveCamera makeDefault position={state.is2D ? [0, 15, 0] : [10, 10, 10]} fov={state.is2D ? 25 : 45} /><OrbitControls enabled={!isDraggingAny} enableRotate={!state.is2D} maxPolarAngle={Math.PI / 2.1} makeDefault minDistance={2} maxDistance={50} target={[0, 0, 0]} /></>)}
@@ -560,6 +636,12 @@ Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation"
           <ContactShadows resolution={1024} scale={40} blur={2.5} opacity={0.6} far={20} color="#000" />
         </Canvas>
       </main>
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+      `}</style>
     </div>
   );
 }
@@ -569,14 +651,9 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
   const bathDepth = 1.25, balconyDepth = 1.0, wallThickness = 0.15;
   return (
     <group onPointerMissed={onDeselect}>
-      {/* Main Floor (Living Zone) */}
       <mesh position={[0, -0.01, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, depth]} /><meshStandardMaterial color={theme.floor} roughness={0.6} metalness={0.1} /></mesh>
-      
-      {/* Service Floors */}
       <mesh position={[0, -0.01, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, bathDepth]} /><meshStandardMaterial color="#d1d5db" roughness={0.3} metalness={0.2} /></mesh>
       <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, balconyDepth]} /><meshStandardMaterial color="#374151" roughness={0.9} /></mesh>
-      
-      {/* Zone Labeling */}
       {mode !== 'pov' && (
         <group position={[0, 0.05, 0]}>
           <Text position={[-width/4, 0, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} fontSize={0.2} color="#1e293b" fillOpacity={0.5} fontWeight="bold">BATHROOM</Text>
@@ -584,21 +661,14 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
           <Text position={[0, 0, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} fontSize={0.2} color="#fff" fillOpacity={0.7} fontWeight="bold">BALCONY</Text>
         </group>
       )}
-      
       {showGrid && (<Grid infiniteGrid fadeDistance={40} fadeStrength={5} sectionSize={1} cellSize={GRID_SIZE} sectionColor={theme.accent} cellColor={theme.grid} position={[0, 0.01, 0]} />)}
-      
       <group>
-        {/* Living Room Walls */}
         <mesh position={[- (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow><boxGeometry args={[3.07, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow><boxGeometry args={[3.07, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
-        
         <mesh position={[-width/2, height/2, -bathDepth/2]} receiveShadow castShadow><boxGeometry args={[wallThickness, height, depth + bathDepth]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[width/2, height/2, -bathDepth/2]} receiveShadow castShadow><boxGeometry args={[wallThickness, height, depth + bathDepth]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
-        
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow><boxGeometry args={[2.9, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow><boxGeometry args={[2.9, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
-        
-        {/* Balcony Enclosure */}
         <mesh position={[- (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow><boxGeometry args={[3.25, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow><boxGeometry args={[3.25, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]}><boxGeometry args={[width, 1.2, 0.04]} /><meshPhysicalMaterial color="#94a3b8" transmission={0.9} thickness={0.1} roughness={0.1} transparent opacity={0.4} /></mesh>
