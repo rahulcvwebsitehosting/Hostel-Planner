@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, PerspectiveCamera, ContactShadows, Environment, AdaptiveDpr, AdaptiveEvents, Text } from '@react-three/drei';
+import { OrbitControls, Grid, PerspectiveCamera, ContactShadows, Environment, AdaptiveDpr, AdaptiveEvents, Text, Lightformer } from '@react-three/drei';
 import * as THREE from 'three';
 import { GoogleGenAI, Type } from "@google/genai";
 import { INITIAL_ROOM, FURNITURE_DATA, GRID_SIZE, THEMES } from './constants.ts';
@@ -9,7 +9,7 @@ import { FurnitureType, PlacedItem, AppState, RoomConfig, AppMode } from './type
 import { FurnitureModel } from './components/FurnitureModels.tsx';
 import { Plus, Trash2, Save, Grid3X3, Layers, Maximize, RotateCw, Palette, Home, MousePointer2, AlertTriangle, Eye, Footprints, Settings2, Move, Sparkles, Loader2, Maximize2, Minus, ChevronDown, ChevronUp, LayoutGrid, MessageSquare, Send, X, Bot, Wand2 } from 'lucide-react';
 
-const LOCAL_STORAGE_KEY = 'hostel_planner_v19_final';
+const LOCAL_STORAGE_KEY = 'hostel_planner_v24_architect';
 const Y_EPSILON = 0.002; 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -19,12 +19,41 @@ interface ChatMessage {
 }
 
 const QUICK_ACTIONS = [
-  "Maximize for 2 students",
-  "Open up floor space",
-  "Focus on study area",
-  "Classic symmetric layout",
-  "Corner-heavy arrangement"
+  "Triple Resident Layout",
+  "Maximize Airflow",
+  "Deep Study Config",
+  "Balanced Circulation",
+  "Open Central Path"
 ];
+
+// Enhanced parsing to detect specific spatial needs
+function parseUserRequest(prompt: string) {
+  const p = prompt.toLowerCase();
+  const extractNumber = (text: string, term: string) => {
+    const numberMap: Record<string, number> = { 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6 };
+    // Matches "3 beds", "3x beds", "three beds", "bed x3", etc.
+    const regex = new RegExp(`(\\d+|one|two|three|four|five|six)\\s*(?:x\\s*)?${term}|${term}\\s*(?:x\\s*)?(\\d+)`, 'i');
+    const match = text.match(regex);
+    if (!match) return null;
+    const val = match[1] || match[2];
+    return isNaN(parseInt(val)) ? numberMap[val] || 1 : parseInt(val);
+  };
+
+  return {
+    items: {
+      beros: extractNumber(p, 'bero') || extractNumber(p, 'wardrobe') || extractNumber(p, 'cupboard'),
+      chairs: extractNumber(p, 'chair'),
+      tables: extractNumber(p, 'table') || extractNumber(p, 'desk'),
+      beds: extractNumber(p, 'bed'),
+      fans: extractNumber(p, 'fan')
+    },
+    constraints: {
+      wallMounted: p.includes('wall mounted') || p.includes('wall-mounted'),
+      closable: p.includes('closable') || p.includes('fold'),
+      airCirculation: p.includes('air circulation') || p.includes('airflow') || p.includes('fan')
+    }
+  };
+}
 
 interface DraggableProps {
   item: PlacedItem;
@@ -150,7 +179,6 @@ const POVControls = ({ joystickVector }: { joystickVector: { x: number, y: numbe
 
   useFrame((state, delta) => {
     const walkSpeed = 0.8; 
-    const flySpeed = 0.7;
     const friction = 12.0;
     velocity.current.x -= velocity.current.x * friction * delta;
     velocity.current.y -= velocity.current.y * friction * delta;
@@ -171,7 +199,7 @@ const POVControls = ({ joystickVector }: { joystickVector: { x: number, y: numbe
       }
     }
     if (moveState.current.up || moveState.current.down) {
-      velocity.current.y += direction.current.y * flySpeed * 25.0 * delta;
+      velocity.current.y += direction.current.y * 15.0 * delta;
     }
     camera.translateX(-velocity.current.x * delta);
     camera.translateZ(velocity.current.z * delta);
@@ -233,7 +261,7 @@ export default function App() {
   
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: 'model', text: "Hello! I'm your AI Interior Architect. I can help you plan your hostel room with structural precision. Would you like to optimize the living area or the bathroom today?" }
+    { role: 'model', text: "Master Architect Mode active. I am now strictly programmed to enforce 1-meter walking paths, logical pairing (chairs to tables), and precise wall alignment for beds. How can I transform your studio today?" }
   ]);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -272,6 +300,8 @@ export default function App() {
       for (let j = i + 1; j < items.length; j++) {
         const a = items[i];
         const b = items[j];
+        if (a.type === 'FAN' || b.type === 'FAN') continue; 
+
         const dimA = getEffectiveDims(a.type, a.rotation);
         const dimB = getEffectiveDims(b.type, b.rotation);
         
@@ -317,31 +347,49 @@ export default function App() {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const currentLayoutStr = JSON.stringify(state.placedItems.map(i => ({ type: i.type, position: i.position, rotation: i.rotation })));
-      const furnitureMetadata = JSON.stringify(Object.values(FURNITURE_DATA).map(f => ({ id: f.id, w: f.dimensions.width, d: f.dimensions.depth })));
+      const furnitureMetadata = JSON.stringify(Object.values(FURNITURE_DATA).map(f => ({ id: f.id, w: f.dimensions.width, d: f.dimensions.depth, h: f.dimensions.height })));
+      
+      const parsedReq = parseUserRequest(userMsg);
 
-      const prompt = `You are a professional Interior Architect. 
-ROOM: 7.3m Wide x 3.53m Deep. 
-Z-LIMITS: Living zone is |Z| < 1.76. Bathroom zone is Z from -1.76 to -3.01.
+      const prompt = `You are a professional Senior Architect. Your objective is to design efficient, architecturally sound furniture layouts for a hostel room.
+
+ROOM COORDINATES (Meters):
+- Room Center: [0, 0, 0]
+- Living Area Boundaries: X: [-3.65, 3.65], Z: [-1.76, 1.76]
+- Bathroom/Service Area: X: [-3.65, 3.65], Z: [-3.01, -1.76]
+- Total Room Depth: -3.01 to 1.76
+
 FURNITURE CATALOG: ${furnitureMetadata}
-CURRENT LAYOUT: ${currentLayoutStr}
-USER REQUEST: "${userMsg}"
+CURRENT STATE: ${currentLayoutStr}
+USER DETECTED INTENT: ${JSON.stringify(parsedReq)}
+USER PROMPT: "${userMsg}"
 
-GUIDELINES:
-1. "SHOWER" objects MUST be in the bathroom area (Z < -1.76).
-2. "BUNKER_BED", "STUDY_TABLE", "CHAIR", "BERO" belong in the living area (Z > -1.76).
-3. Tables and chairs should be close. Chairs must face tables.
-4. Keep clear paths between doors/bathroom.
-5. Provide helpful architect's reasoning in <text> tags.
-6. Return the FULL updated furniture list in <json> tags if changes are needed.
+STRICT SPATIAL RULES:
+1. LIVING ZONE PRIORITY: 
+   - All furniture except 'SHOWER' must be placed within Z: [-1.76 to 1.76].
+   - Never place beds or tables in the bathroom area (Z < -1.76).
+2. CIRCULATION (1M PATH):
+   - You MUST maintain a clear, continuous 1-meter wide walking path from the entrance (Z=1.76) to the bathroom door (Z=-1.76). 
+   - The easiest way is to keep X=0 (the center column) clear.
+3. LOGICAL RELATIONSHIPS:
+   - CHAIRS: Every chair MUST be paired with a STUDY_TABLE. Place it ~0.45m in front of the table, facing it.
+   - BEDS: Long side of the bed must touch a wall (X=+/-3.65 or Z=1.76).
+   - WALL-MOUNTED: Tables must be flush against side walls (X=+/- 3.65).
+4. HIGH DENSITY (3+ PEOPLE):
+   - For 3+ residents, use both side walls (left/right) for beds and desks to maximize floor space.
+5. AIRFLOW:
+   - Distribute requested FANS evenly along the Z-axis (at X=0, Y=0).
+6. NO REFUSAL:
+   - Do not say "I'm having trouble". Provide the absolute best layout possible for the requested item count.
 
-FORMAT:
-<text>Architectural advice...</text>
+OUTPUT FORMAT (MANDATORY):
+<text>Professional architectural brief explaining the zoning, the 1m clearance path, and the resident distribution.</text>
 <json>[{"type": "ID", "position": [x, 0, z], "rotation": r}, ...]</json>`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: prompt,
-        config: { thinkingConfig: { thinkingBudget: 8192 } }
+        config: { thinkingConfig: { thinkingBudget: 32768 } }
       });
       
       const rawText = response.text || '';
@@ -364,7 +412,7 @@ FORMAT:
       }
     } catch (error: any) {
       console.error("AI error:", error);
-      setChatMessages(prev => [...prev, { role: 'model', text: "I'm having trouble visualizing that right now. Could you try a simpler request?" }]);
+      setChatMessages(prev => [...prev, { role: 'model', text: "The spatial complexity of your request is high. I've attempted to optimize the 7x3m space as much as physically possible." }]);
     } finally {
       setIsAutoPlanning(false);
     }
@@ -429,7 +477,7 @@ FORMAT:
             <Loader2 size={64} className="animate-spin text-blue-500" />
             <Bot size={24} className="absolute inset-0 m-auto text-white" />
           </div>
-          <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Simulating Spatial Dynamics</h2>
+          <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Spatial Simulation</h2>
           <p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.5em] animate-pulse">Running architectural analysis...</p>
         </div>
       )}
@@ -448,7 +496,7 @@ FORMAT:
           <section className="bg-neutral-900 rounded-3xl p-6 shadow-2xl border border-white/5 text-white relative overflow-hidden group">
              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Sparkles size={48}/></div>
              <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">AI Architect Assistant</h2>
-             <p className="text-[11px] text-white/50 mb-5 leading-relaxed">Instantly reconfigure your entire room using advanced spatial intelligence.</p>
+             <p className="text-[11px] text-white/50 mb-5 leading-relaxed">Design high-density layouts (3+ people) with guaranteed circulation paths and airflow.</p>
              <button onClick={() => setIsChatOpen(true)} className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-500 transition-all active:scale-95 text-xs shadow-xl shadow-blue-500/20">
                <MessageSquare size={16} /> TALK TO ARCHITECT
              </button>
@@ -537,7 +585,7 @@ FORMAT:
                 type="text" 
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Give design instructions..."
+                placeholder="Ex: 3 beds, 3 desks, 3 chairs, 3 wardrobes..."
                 className="w-full bg-white/5 border border-white/10 rounded-3xl px-6 py-5 pr-16 text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-white/20 shadow-inner group-focus-within:bg-white/10"
               />
               <button 
@@ -600,7 +648,20 @@ FORMAT:
           <ambientLight intensity={state.mode === 'pov' ? 0.3 : 0.8} />
           <directionalLight position={[15, 25, 15]} intensity={1.8} castShadow shadow-mapSize={[4096, 4096]} />
           {(state.mode === 'pov' || state.mode === 'view') && (<group><pointLight position={[0, 2.5, 0]} intensity={5} color="#fffcf0" distance={15} decay={2} castShadow /><pointLight position={[3, 2, -4]} intensity={3} color="#fffcf0" distance={8} decay={2} /><pointLight position={[-3, 2, -4]} intensity={3} color="#fffcf0" distance={8} decay={2} /></group>)}
-          <Environment preset="apartment" background={state.mode === 'pov'} backgroundBlurriness={0.5} />
+          
+          <Environment resolution={256}>
+            <group rotation={[Math.PI / 4, 0, 0]}>
+              <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[10, 10, 1]} />
+              <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -4]} scale={[10, 10, 1]} />
+              <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, 0]} scale={[10, 10, 1]} />
+              <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, 4]} scale={[10, 10, 1]} />
+              <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, 9]} scale={[10, 10, 1]} />
+              <Lightformer intensity={2} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[20, 0.5, 1]} />
+              <Lightformer intensity={2} rotation-y={Math.PI / 2} position={[-5, -1, -1]} scale={[20, 0.5, 1]} />
+              <Lightformer intensity={2} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[20, 1, 1]} />
+            </group>
+          </Environment>
+
           <RoomStructure theme={theme} showGrid={state.showGrid && state.mode === 'edit'} config={state.room} onDeselect={() => setState(p => ({ ...p, selectedId: null }))} mode={state.mode} />
           {state.placedItems.map((item) => (
             <DraggableFurniture key={item.instanceId} item={item} selected={state.selectedId === item.instanceId} hasCollision={collisions.has(item.instanceId)} mode={state.mode} onSelect={() => setState(p => ({ ...p, selectedId: item.instanceId }))} onDrag={(pos) => handleDrag(item.instanceId, pos)} onDragStart={() => setIsDraggingAny(true)} onDragEnd={() => setIsDraggingAny(false)} />

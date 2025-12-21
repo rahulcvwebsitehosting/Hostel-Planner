@@ -52,6 +52,24 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
   };
 
   switch (type) {
+    case 'FAN':
+      return (
+        <group position={[0, 2.6, 0]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 0.1]} />
+            {getPBRMaterial('#64748b', { metal: 0.9, rough: 0.1 })}
+          </mesh>
+          <group rotation={[0, 0, 0]}>
+            {[0, (Math.PI * 2) / 3, (Math.PI * 4) / 3].map((rot, i) => (
+              <mesh key={i} rotation={[0, rot, 0]} position={[0.4, -0.05, 0]}>
+                <boxGeometry args={[0.8, 0.01, 0.15]} />
+                {getPBRMaterial('#f8fafc', { metal: 0.2, rough: 0.4 })}
+              </mesh>
+            ))}
+          </group>
+        </group>
+      );
+
     case 'BUNKER_BED':
       const frameMatProps = { metal: 0.8, rough: 0.2, clearcoat: 0.1 };
       const mattressMat = isRealistic ? (
@@ -105,8 +123,13 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
             <boxGeometry args={[width - 0.05, 0.03, depth - 0.05]} />
             {getPBRMaterial(woodColor, { metal: 0.1, rough: 0.7, clearcoat: 0.4 })}
           </mesh>
-          <mesh position={[0, -0.1, -depth / 2 + 0.08]} castShadow>
-            <boxGeometry args={[width * 0.6, 0.02, 0.05]} />
+          {/* Wall brackets */}
+          <mesh position={[0, -0.1, -depth / 2 + 0.01]} castShadow>
+            <boxGeometry args={[width * 0.8, 0.02, 0.02]} />
+            {getPBRMaterial(metalColor, { metal: 1, rough: 0.3 })}
+          </mesh>
+          <mesh position={[0, -0.2, -depth / 2 + 0.01]} rotation={[Math.PI / 4, 0, 0]} castShadow>
+            <boxGeometry args={[0.02, 0.3, 0.02]} />
             {getPBRMaterial(metalColor, { metal: 1, rough: 0.3 })}
           </mesh>
         </group>

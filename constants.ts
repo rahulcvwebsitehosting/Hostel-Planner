@@ -70,6 +70,14 @@ export const FURNITURE_DATA: Record<string, FurnitureDefinition> = {
     color: '#cbd5e1',
     maxQuantity: 99,
   },
+  FAN: {
+    id: 'FAN',
+    name: 'Ceiling Fan',
+    icon: '🌀',
+    dimensions: { width: 1.2, depth: 1.2, height: 0.2 },
+    color: '#f8fafc',
+    maxQuantity: 4,
+  }
 };
 
 export const GRID_SIZE = 0.05; // 5 cm snapping for more precision
