@@ -7,9 +7,10 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { INITIAL_ROOM, FURNITURE_DATA, GRID_SIZE, THEMES } from './constants';
 import { FurnitureType, PlacedItem, AppState, RoomConfig, AppMode } from './types';
 import { FurnitureModel } from './components/FurnitureModels';
-import { Plus, Trash2, Save, Grid3X3, Layers, Maximize, RotateCw, Palette, Home, MousePointer2, AlertTriangle, Eye, Footprints, Settings2, Move, Sparkles, Loader2, Maximize2, Minus, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, Save, Grid3X3, Layers, Maximize, RotateCw, Palette, Home, MousePointer2, AlertTriangle, Eye, Footprints, Settings2, Move, Sparkles, Loader2, Maximize2, Minus, ChevronDown, ChevronUp, LayoutGrid } from 'lucide-react';
 
-const LOCAL_STORAGE_KEY = 'hostel_planner_v15_final';
+const LOCAL_STORAGE_KEY = 'hostel_planner_v16_pro';
+const Y_EPSILON = 0.002; 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 interface DraggableProps {
@@ -48,7 +49,7 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
     e.stopPropagation();
     const point = new THREE.Vector3();
     e.ray.intersectPlane(floorPlane, point);
-    onDrag([point.x, 0, point.z]);
+    onDrag([point.x, Y_EPSILON, point.z]);
   };
 
   const itemMetadata = FURNITURE_DATA[item.type];
@@ -56,7 +57,7 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
 
   return (
     <group
-      position={item.position}
+      position={[item.position[0], item.position[1] + Y_EPSILON, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
@@ -66,7 +67,7 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
       {selected && mode === 'edit' && (
         <group position={[0, 0.01, 0]}>
            <mesh rotation={[-Math.PI/2, 0, 0]}>
-              <planeGeometry args={[itemMetadata.dimensions.width + 0.05, itemMetadata.dimensions.depth + 0.05]} />
+              <planeGeometry args={[itemMetadata.dimensions.width + 0.1, itemMetadata.dimensions.depth + 0.1]} />
               <meshBasicMaterial color={hasCollision ? "#ef4444" : "#3B82F6"} transparent opacity={0.3} />
            </mesh>
         </group>
@@ -218,7 +219,6 @@ export default function App() {
   const [showPOVOverlay, setShowPOVOverlay] = useState(true);
   const [showAiSettings, setShowAiSettings] = useState(false);
   
-  // Custom layout targets for AI
   const [layoutTargets, setLayoutTargets] = useState<Record<FurnitureType, number>>({
     BUNKER_BED: 2,
     STUDY_TABLE: 2,
@@ -258,10 +258,17 @@ export default function App() {
         const b = items[j];
         const dimA = getEffectiveDims(a.type, a.rotation);
         const dimB = getEffectiveDims(b.type, b.rotation);
-        if (dimA.w === 0 || dimB.w === 0) continue;
-        const overlapX = Math.abs(a.position[0] - b.position[0]) < (dimA.w + dimB.w) / 2 - 0.005;
-        const overlapZ = Math.abs(a.position[2] - b.position[2]) < (dimA.d + dimB.d) / 2 - 0.005;
-        if (overlapX && overlapZ) {
+        
+        const boxA = new THREE.Box2(
+          new THREE.Vector2(a.position[0] - dimA.w / 2, a.position[2] - dimA.d / 2),
+          new THREE.Vector2(a.position[0] + dimA.w / 2, a.position[2] + dimA.d / 2)
+        );
+        const boxB = new THREE.Box2(
+          new THREE.Vector2(b.position[0] - dimB.w / 2, b.position[2] - dimB.d / 2),
+          new THREE.Vector2(b.position[0] + dimB.w / 2, b.position[2] + dimB.d / 2)
+        );
+
+        if (boxA.intersectsBox(boxB)) {
           collidingIds.add(a.instanceId);
           collidingIds.add(b.instanceId);
         }
@@ -277,11 +284,11 @@ export default function App() {
   const clampPosition = useCallback((pos: [number, number, number], type: FurnitureType, rotation: number): [number, number, number] => {
     const { w, d } = getEffectiveDims(type, rotation);
     if (w === 0) return pos;
-    const roomWidth = 7.30, roomDepth = 3.53, padding = 0.1;
+    const roomWidth = 7.30, roomDepth = 3.53, wallClearance = 0.05;
     
-    // Limits based on the living room floor (3.53m depth, 7.3m width)
-    const limitX = (roomWidth / 2) - (w / 2) - padding;
-    const limitZ = (roomDepth / 2) - (d / 2) - padding;
+    // Living area is central floor. Bathroom starts at Z < -1.765. Entrance at Z > 1.765.
+    const limitX = (roomWidth / 2) - (w / 2) - wallClearance;
+    const limitZ = (roomDepth / 2) - (d / 2) - wallClearance;
 
     let targetX = Math.max(-limitX, Math.min(limitX, pos[0]));
     let targetZ = Math.max(-limitZ, Math.min(limitZ, pos[2]));
@@ -335,40 +342,33 @@ export default function App() {
     setIsAutoPlanning(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-      const prompt = `Task: Create a professional furniture layout for a hostel room.
-CRITICAL SPATIAL COORDINATES (METERS):
-- LIVING ROOM FLOOR SIZE: Width 7.30m (X from -3.65 to 3.65), Depth 3.53m (Z from -1.76 to 1.76).
-- CENTER OF ROOM: [0, 0, 0].
-- ENTRANCE WALL (+Z): Located at Z = 1.76. Lockers/Beros usually go here.
-- WINDOW WALL (-Z): Located at Z = -1.76. Study tables usually go here.
-- SIDE WALLS (+/- X): Located at X = +/- 3.65. Beds usually go here.
+      const prompt = `Task: Professional Hostel Layout Design.
+ROOM DIMENSIONS: 7.30m Wide (X-axis) x 3.53m Deep (Z-axis).
+COORDINATE RANGE (LIVING AREA):
+- X: [-3.60, 3.60] (Stay away from absolute edges by 0.05m)
+- Z: [-1.70, 1.70] (STRICT: Never place where Z < -1.75 as it is the Bathroom)
 
-- ABSOLUTELY FORBIDDEN ZONES: 
-  - Never place furniture where Z < -1.76. This is the BATHROOM and TOILET area.
-  - Never place furniture where |X| > 3.65. This is OUTSIDE the building.
-  - Never place furniture where Z > 1.76. This is the ENTRANCE hallway.
+FURNITURE QUANTITIES:
+- BUNKER_BED (0.85m x 1.93m): ${layoutTargets.BUNKER_BED}
+- STUDY_TABLE (0.79m x 0.45m): ${layoutTargets.STUDY_TABLE}
+- BERO (1.06m x 0.51m): ${layoutTargets.BERO}
+- CHAIR (0.45m x 0.45m): ${layoutTargets.CHAIR}
 
-REQUIRED QUANTITIES:
-- BUNKER_BED: ${layoutTargets.BUNKER_BED}
-- STUDY_TABLE: ${layoutTargets.STUDY_TABLE}
-- BERO (Steel Locker): ${layoutTargets.BERO}
-- CHAIR: ${layoutTargets.CHAIR}
+SPATIAL RULES:
+1. BEDS: MUST be parallel to side walls (Rotation 0 or PI). Preferred at X=+/- 3.2.
+2. TABLES: Preferred against back wall (Z ~ -1.3). Ensure enough space behind them for chairs.
+3. CHAIRS: MUST be paired with a STUDY_TABLE. If Table is at [x, 0, z], place Chair at [x, 0, z+0.5] facing the table.
+4. BEROS: Place near the entrance (+Z area, Z ~ 1.2).
+5. CIRCULATION: Maintain a 1.2m wide clear walking path from the entrance (Z=1.7, X=0) to the window/back wall.
+6. OVERLAP: DO NOT let any furniture bounding boxes overlap.
 
-PLACEMENT LOGIC:
-1. BEDS: Place along side walls (X near +/- 3.1). Keep them parallel to the X-axis walls (Rotation 0 or PI).
-2. BEROS: Place near the entrance (+Z area, Z around 1.0 to 1.5).
-3. TABLES: Place against the back wall window (-Z area, Z around -1.2 to -1.5).
-4. CHAIRS: Place them strictly in front of tables (e.g., if table is at Z=-1.3, place chair at Z=-0.8).
-5. CIRCULATION: Ensure there is at least a 1-meter clear path from the entrance (+Z center) through the room.
-
-OUTPUT FORMAT: Return ONLY a JSON array of objects: { "type": string, "position": [number, 0, number], "rotation": number }.
-Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
+Return ONLY a JSON array of: { "type": string, "position": [x, 0, z], "rotation": number }.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-pro-preview",
         contents: prompt,
         config: {
-          thinkingConfig: { thinkingBudget: 2048 },
+          thinkingConfig: { thinkingBudget: 32768 },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -392,7 +392,6 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
         .filter((item: any) => validTypes.includes(item.type))
         .map((item: any) => {
           const rawPos = item.position as [number, number, number];
-          // Force Clamp and validate coordinate integrity
           const clamped = clampPosition(rawPos, item.type as FurnitureType, item.rotation);
           return {
             instanceId: generateId(),
@@ -405,16 +404,23 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
       setState(prev => ({ ...prev, placedItems, selectedId: null }));
     } catch (error: any) {
       console.error("AI Planning failed:", error);
-      alert("AI was unable to generate a plan. Using fallback layout.");
-      // Fallback: 2-student setup
-      const fallback: PlacedItem[] = [
-        { instanceId: generateId(), type: 'BUNKER_BED', position: [-3.1, 0, 0], rotation: 0 },
-        { instanceId: generateId(), type: 'BUNKER_BED', position: [3.1, 0, 0], rotation: 0 },
-        { instanceId: generateId(), type: 'BERO', position: [-2.5, 0, 1.2], rotation: 0 },
-        { instanceId: generateId(), type: 'BERO', position: [2.5, 0, 1.2], rotation: 0 },
-      ];
-      setState(prev => ({ ...prev, placedItems: fallback, selectedId: null }));
+      alert("AI layout error. Using standard arrangement.");
+      applyStandardLayout();
     } finally { setIsAutoPlanning(false); }
+  };
+
+  const applyStandardLayout = () => {
+    const fallback: PlacedItem[] = [
+      { instanceId: generateId(), type: 'BUNKER_BED', position: [-3.2, 0, 0], rotation: 0 },
+      { instanceId: generateId(), type: 'BUNKER_BED', position: [3.2, 0, 0], rotation: 0 },
+      { instanceId: generateId(), type: 'STUDY_TABLE', position: [-1.2, 0, -1.3], rotation: 0 },
+      { instanceId: generateId(), type: 'STUDY_TABLE', position: [1.2, 0, -1.3], rotation: 0 },
+      { instanceId: generateId(), type: 'CHAIR', position: [-1.2, 0, -0.8], rotation: 0 },
+      { instanceId: generateId(), type: 'CHAIR', position: [1.2, 0, -0.8], rotation: 0 },
+      { instanceId: generateId(), type: 'BERO', position: [-2.5, 0, 1.3], rotation: 0 },
+      { instanceId: generateId(), type: 'BERO', position: [2.5, 0, 1.3], rotation: 0 },
+    ];
+    setState(prev => ({ ...prev, placedItems: fallback, selectedId: null }));
   };
 
   const updateTarget = (type: FurnitureType, delta: number) => {
@@ -433,10 +439,10 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
   return (
     <div className="flex h-screen bg-neutral-950 flex-col md:flex-row overflow-hidden font-sans select-none text-white">
       {isAutoPlanning && (
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center text-white">
-          <Loader2 size={48} className="animate-spin text-blue-500 mb-4" />
-          <h2 className="text-xl font-bold tracking-widest uppercase">Designing with Gemini...</h2>
-          <p className="text-white/40 text-[10px] mt-2 uppercase tracking-[0.2em]">Calculating spatial reasoning & constraints</p>
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center text-white text-center p-6">
+          <Loader2 size={64} className="animate-spin text-blue-500 mb-6" />
+          <h2 className="text-2xl font-bold tracking-widest uppercase mb-2">Architectural Logic Initializing</h2>
+          <p className="text-white/40 text-xs uppercase tracking-[0.3em] max-w-sm">Applying ergonomic constraints and circulation path optimization...</p>
         </div>
       )}
       <aside className={`w-full md:w-80 bg-white border-r border-neutral-200 flex flex-col z-20 shadow-2xl transition-transform duration-500 ${state.mode !== 'edit' ? '-translate-x-full md:absolute' : 'translate-x-0'}`}>
@@ -448,8 +454,7 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
           </div>
         </div>
         <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-          {/* AI CONFIG SECTION */}
-          <section className="bg-neutral-900 rounded-2xl p-4 shadow-xl">
+          <section className="bg-neutral-900 rounded-2xl p-4 shadow-xl border border-white/5">
              <div className="flex items-center justify-between mb-4">
                 <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2"><Sparkles size={12}/> AI Layout Config</h2>
                 <button onClick={() => setShowAiSettings(!showAiSettings)} className="text-white/40 hover:text-white transition-colors">
@@ -469,17 +474,25 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
                      </div>
                    </div>
                  ))}
-                 <button onClick={() => setLayoutTargets({ BUNKER_BED: 2, STUDY_TABLE: 2, BERO: 2, CHAIR: 2 })} className="w-full py-1.5 text-[10px] font-black text-white/40 hover:text-white transition-colors uppercase">Reset to 2-Student</button>
+                 <button onClick={() => setLayoutTargets({ BUNKER_BED: 2, STUDY_TABLE: 2, BERO: 2, CHAIR: 2 })} className="w-full py-1.5 text-[10px] font-black text-white/40 hover:text-white transition-colors uppercase">Reset Targets</button>
                </div>
              )}
 
-             <button onClick={handleAutoPlan} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-all active:scale-95 text-xs">
+             <button onClick={handleAutoPlan} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-all active:scale-95 text-xs shadow-lg shadow-blue-500/20">
                <Sparkles size={16} /> GENERATE PLAN
              </button>
           </section>
 
           <section>
-            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12}/> Color Palette</h2>
+             <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><LayoutGrid size={12}/> Layout Presets</h2>
+             <div className="grid grid-cols-2 gap-2">
+                <button onClick={applyStandardLayout} className="py-2 text-[10px] font-black uppercase rounded-lg border-2 border-neutral-100 hover:border-blue-500 transition-colors text-neutral-600">Standard 2P</button>
+                <button onClick={() => setState(p => ({ ...p, placedItems: [] }))} className="py-2 text-[10px] font-black uppercase rounded-lg border-2 border-neutral-100 hover:border-red-500 transition-colors text-neutral-600">Clear Room</button>
+             </div>
+          </section>
+
+          <section>
+            <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-3 flex items-center gap-2"><Palette size={12}/> Visual Style</h2>
             <div className="flex gap-2">{Object.entries(THEMES).map(([key, t]) => (<button key={key} onClick={() => setTheme(t)} className={`flex-1 h-10 rounded-lg border-2 transition-all ${theme === t ? 'border-blue-500 scale-95 shadow-inner' : 'border-neutral-200'}`} style={{ backgroundColor: t.floor }} />))}</div>
           </section>
 
@@ -503,7 +516,7 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
 
           {state.selectedId && (
             <section className="animate-in slide-in-from-bottom-4 p-4 bg-blue-600 rounded-2xl shadow-xl text-white">
-              <h3 className="text-[10px] font-black uppercase flex items-center gap-2 mb-3">Selected Item Controls</h3>
+              <h3 className="text-[10px] font-black uppercase flex items-center gap-2 mb-3">Placement Tools</h3>
               <div className="flex gap-2">
                 <button onClick={rotateItem} className="flex-1 flex flex-col items-center p-3 bg-white/20 rounded-xl hover:bg-white/30 transition-all"><RotateCw size={18} /><span className="text-[10px] font-black mt-1 uppercase">Rotate</span></button>
                 <button onClick={removeItem} className="flex-1 flex flex-col items-center p-3 bg-red-500 rounded-xl hover:bg-red-400 transition-all"><Trash2 size={18} /><span className="text-[10px] font-black mt-1 uppercase">Delete</span></button>
@@ -511,7 +524,9 @@ Valid types: "BUNKER_BED", "STUDY_TABLE", "BERO", "CHAIR".`;
             </section>
           )}
         </div>
-        <div className="p-6 border-t border-neutral-100"><button onClick={() => { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); alert("Saved!"); }} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl transition-all">Save Project</button></div>
+        <div className="p-6 border-t border-neutral-100 flex flex-col gap-2">
+          <button onClick={() => { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); alert("Spatial arrangement saved!"); }} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl transition-all">Save Project</button>
+        </div>
       </aside>
       <main className="flex-1 relative">
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex bg-neutral-900/40 backdrop-blur-2xl rounded-2xl p-1 shadow-2xl border border-white/10">
@@ -554,15 +569,14 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
   const bathDepth = 1.25, balconyDepth = 1.0, wallThickness = 0.15;
   return (
     <group onPointerMissed={onDeselect}>
-      {/* Living Room Floor */}
+      {/* Main Floor (Living Zone) */}
       <mesh position={[0, -0.01, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, depth]} /><meshStandardMaterial color={theme.floor} roughness={0.6} metalness={0.1} /></mesh>
       
-      {/* Bathroom / Toilet Floor */}
+      {/* Service Floors */}
       <mesh position={[0, -0.01, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, bathDepth]} /><meshStandardMaterial color="#d1d5db" roughness={0.3} metalness={0.2} /></mesh>
-      
-      {/* Balcony Floor */}
       <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, balconyDepth]} /><meshStandardMaterial color="#374151" roughness={0.9} /></mesh>
       
+      {/* Zone Labeling */}
       {mode !== 'pov' && (
         <group position={[0, 0.05, 0]}>
           <Text position={[-width/4, 0, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} fontSize={0.2} color="#1e293b" fillOpacity={0.5} fontWeight="bold">BATHROOM</Text>
@@ -570,28 +584,23 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
           <Text position={[0, 0, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} fontSize={0.2} color="#fff" fillOpacity={0.7} fontWeight="bold">BALCONY</Text>
         </group>
       )}
-
+      
       {showGrid && (<Grid infiniteGrid fadeDistance={40} fadeStrength={5} sectionSize={1} cellSize={GRID_SIZE} sectionColor={theme.accent} cellColor={theme.grid} position={[0, 0.01, 0]} />)}
       
-      {/* Walls */}
       <group>
-        {/* Front wall (entrance) */}
+        {/* Living Room Walls */}
         <mesh position={[- (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow><boxGeometry args={[3.07, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow><boxGeometry args={[3.07, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         
-        {/* Side walls */}
         <mesh position={[-width/2, height/2, -bathDepth/2]} receiveShadow castShadow><boxGeometry args={[wallThickness, height, depth + bathDepth]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[width/2, height/2, -bathDepth/2]} receiveShadow castShadow><boxGeometry args={[wallThickness, height, depth + bathDepth]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         
-        {/* Back wall (bathroom divider) */}
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow><boxGeometry args={[2.9, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow><boxGeometry args={[2.9, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         
-        {/* External back wall (beyond bathroom) */}
+        {/* Balcony Enclosure */}
         <mesh position={[- (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow><boxGeometry args={[3.25, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
         <mesh position={[ (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow><boxGeometry args={[3.25, height, wallThickness]} /><meshStandardMaterial color={theme.wall} roughness={0.8} /></mesh>
-        
-        {/* Balcony Railing */}
         <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]}><boxGeometry args={[width, 1.2, 0.04]} /><meshPhysicalMaterial color="#94a3b8" transmission={0.9} thickness={0.1} roughness={0.1} transparent opacity={0.4} /></mesh>
       </group>
     </group>
