@@ -1,5 +1,5 @@
 
-export type FurnitureType = 'BUNKER_BED' | 'STUDY_TABLE' | 'BERO' | 'CHAIR';
+export type FurnitureType = 'BUNKER_BED' | 'STUDY_TABLE' | 'BERO' | 'CHAIR' | 'SHOWER';
 export type AppMode = 'edit' | 'view' | 'pov';
 
 export interface Dimensions {

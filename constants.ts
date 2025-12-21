@@ -1,5 +1,5 @@
 
-import { FurnitureDefinition, RoomConfig } from './types';
+import { FurnitureDefinition, RoomConfig } from './types.ts';
 
 // Dimensions converted from cm to meters (1 unit = 1 meter)
 export const INITIAL_ROOM: RoomConfig = {
@@ -60,6 +60,14 @@ export const FURNITURE_DATA: Record<string, FurnitureDefinition> = {
     icon: '💺',
     dimensions: { width: 0.45, depth: 0.45, height: 0.85 },
     color: '#1e293b',
+    maxQuantity: 99,
+  },
+  SHOWER: {
+    id: 'SHOWER',
+    name: 'Shower Enclosure',
+    icon: '🚿',
+    dimensions: { width: 0.9, depth: 0.9, height: 1.8 },
+    color: '#cbd5e1',
     maxQuantity: 99,
   },
 };

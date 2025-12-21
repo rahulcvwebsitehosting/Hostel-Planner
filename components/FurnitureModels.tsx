@@ -16,8 +16,8 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
 
   const { width, height, depth } = data.dimensions;
 
-  const getPBRMaterial = (color: string, options: { metal?: number, rough?: number, clearcoat?: number, sheen?: number } = {}) => {
-    const { metal = 0.5, rough = 0.5, clearcoat = 0, sheen = 0 } = options;
+  const getPBRMaterial = (color: string, options: { metal?: number, rough?: number, clearcoat?: number, sheen?: number, transmission?: number } = {}) => {
+    const { metal = 0.5, rough = 0.5, clearcoat = 0, sheen = 0, transmission = 0 } = options;
     const baseColor = hasCollision ? '#ef4444' : (selected ? '#3B82F6' : color);
 
     if (isRealistic) {
@@ -30,6 +30,10 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
           clearcoatRoughness={0.1}
           sheen={sheen}
           sheenRoughness={0.5}
+          transmission={transmission}
+          thickness={transmission > 0 ? 0.05 : 0}
+          transparent={transmission > 0}
+          opacity={transmission > 0 ? 0.3 : 1}
           envMapIntensity={1.8}
         />
       );
@@ -40,6 +44,8 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
         color={baseColor}
         metalness={metal * 0.5}
         roughness={rough}
+        transparent={transmission > 0}
+        opacity={transmission > 0 ? 0.4 : 1}
         envMapIntensity={1}
       />
     );
@@ -142,6 +148,46 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
               {getPBRMaterial('#000000', legMatProps)}
             </mesh>
           ))}
+        </group>
+      );
+
+    case 'SHOWER':
+      const glassProps = { rough: 0.1, transmission: 0.9 };
+      const trayMatProps = { metal: 0, rough: 0.2 };
+      return (
+        <group>
+          {/* Shower Tray / Base */}
+          <mesh position={[0, 0.05, 0]} castShadow receiveShadow>
+            <boxGeometry args={[width, 0.1, depth]} />
+            {getPBRMaterial('#ffffff', trayMatProps)}
+          </mesh>
+          {/* Glass Walls */}
+          <mesh position={[-width / 2 + 0.01, 0.95, 0]} castShadow>
+            <boxGeometry args={[0.02, height, depth]} />
+            {getPBRMaterial('#ffffff', glassProps)}
+          </mesh>
+          <mesh position={[0, 0.95, -depth / 2 + 0.01]} castShadow>
+            <boxGeometry args={[width, height, 0.02]} />
+            {getPBRMaterial('#ffffff', glassProps)}
+          </mesh>
+          <mesh position={[width / 2 - 0.01, 0.95, 0]} castShadow>
+            <boxGeometry args={[0.02, height, depth]} />
+            {getPBRMaterial('#ffffff', glassProps)}
+          </mesh>
+          {/* Frame Top */}
+          <mesh position={[0, height + 0.05, 0]} castShadow>
+            <boxGeometry args={[width + 0.02, 0.04, depth + 0.02]} />
+            {getPBRMaterial('#475569', { metal: 1, rough: 0.2 })}
+          </mesh>
+          {/* Shower Head / Pipe */}
+          <mesh position={[0, height - 0.2, -depth / 2 + 0.05]} castShadow>
+            <cylinderGeometry args={[0.02, 0.02, 0.4]} />
+            {getPBRMaterial('#94a3b8', { metal: 1, rough: 0.2 })}
+          </mesh>
+          <mesh position={[0, height - 0.2 + 0.2, -depth / 2 + 0.1]} rotation={[Math.PI/2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.05, 0.03, 0.08]} />
+            {getPBRMaterial('#94a3b8', { metal: 1, rough: 0.2 })}
+          </mesh>
         </group>
       );
 
