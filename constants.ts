@@ -10,20 +10,20 @@ export const INITIAL_ROOM: RoomConfig = {
 
 export const THEMES = {
   HOSTEL_STANDARD: {
-    wall: '#f1f5f9', // Slate 100
-    floor: '#e2e8f0', // Slate 200
+    wall: '#f8fafc', // Slate 50
+    floor: '#f1f5f9', // Slate 100
     accent: '#3B82F6',
-    grid: '#94a3b8'
+    grid: '#cbd5e1'
   },
   CONCRETE: {
-    wall: '#e5e7eb', // Gray 200
-    floor: '#94a3b8', // Slate 400
+    wall: '#e5e7eb', 
+    floor: '#94a3b8', 
     accent: '#6366f1',
     grid: '#475569'
   },
   WARM_DORM: {
-    wall: '#fafaf9', // Stone 50
-    floor: '#d6d3d1', // Stone 300
+    wall: '#fafaf9', 
+    floor: '#d6d3d1', 
     accent: '#f59e0b',
     grid: '#78716c'
   }
@@ -35,7 +35,7 @@ export const FURNITURE_DATA: Record<string, FurnitureDefinition> = {
     name: 'Bunker Bed',
     icon: '🛏️',
     dimensions: { width: 0.85, depth: 1.93, height: 1.8 },
-    color: '#334155', // Steel blue-grey frame
+    color: '#334155', 
     maxQuantity: 99,
   },
   STUDY_TABLE: {
@@ -61,39 +61,15 @@ export const FURNITURE_DATA: Record<string, FurnitureDefinition> = {
     dimensions: { width: 0.45, depth: 0.45, height: 0.85 },
     color: '#1e293b',
     maxQuantity: 99,
-  },
-  TOILET: {
-    id: 'TOILET',
-    name: 'Western Toilet',
-    icon: '🚽',
-    dimensions: { width: 0.4, depth: 0.7, height: 0.8 },
-    color: '#ffffff',
-    maxQuantity: 2,
-  },
-  WASHBASIN: {
-    id: 'WASHBASIN',
-    name: 'Washbasin',
-    icon: '🚰',
-    dimensions: { width: 0.5, depth: 0.4, height: 0.85 },
-    color: '#f8fafc',
-    maxQuantity: 4,
-  },
-  SHOWER: {
-    id: 'SHOWER',
-    name: 'Shower Enclosure',
-    icon: '🚿',
-    dimensions: { width: 0.9, depth: 0.9, height: 1.8 },
-    color: '#cbd5e1',
-    maxQuantity: 99,
-  },
-  FAN: {
-    id: 'FAN',
-    name: 'Ceiling Fan',
-    icon: '🌀',
-    dimensions: { width: 1.2, depth: 1.2, height: 0.2 },
-    color: '#f8fafc',
-    maxQuantity: 4,
   }
 };
 
-export const GRID_SIZE = 0.05; // 5 cm snapping for more precision
+// Fixtures that are default but not in the library
+export const FIXTURE_DATA: Record<string, any> = {
+  TOILET: { dimensions: { width: 0.4, depth: 0.7, height: 0.8 }, color: '#ffffff' },
+  WASHBASIN: { dimensions: { width: 0.5, depth: 0.4, height: 0.85 }, color: '#f8fafc' },
+  SHOWER: { dimensions: { width: 0.9, depth: 0.9, height: 1.8 }, color: '#cbd5e1' },
+  FAN: { dimensions: { width: 1.2, depth: 1.2, height: 0.2 }, color: '#f8fafc' }
+};
+
+export const GRID_SIZE = 0.05; 
