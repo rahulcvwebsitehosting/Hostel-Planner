@@ -10,22 +10,31 @@ export const INITIAL_ROOM: RoomConfig = {
 
 export const THEMES = {
   HOSTEL_STANDARD: {
-    wall: '#f8fafc', // Slate 50
-    floor: '#f1f5f9', // Slate 100
+    wall: '#f1f5f9', // Slate 100
+    floor: '#e2e8f0', // Slate 200
     accent: '#3B82F6',
-    grid: '#cbd5e1'
+    grid: '#cbd5e1',
+    floorRoughness: 0.1,
+    floorMetalness: 0.05,
+    wallRoughness: 0.9,
   },
   CONCRETE: {
-    wall: '#e5e7eb', 
-    floor: '#94a3b8', 
+    wall: '#94a3b8', 
+    floor: '#475569', 
     accent: '#6366f1',
-    grid: '#475569'
+    grid: '#334155',
+    floorRoughness: 0.5,
+    floorMetalness: 0.2,
+    wallRoughness: 0.7,
   },
   WARM_DORM: {
     wall: '#fafaf9', 
     floor: '#d6d3d1', 
     accent: '#f59e0b',
-    grid: '#78716c'
+    grid: '#78716c',
+    floorRoughness: 0.8,
+    floorMetalness: 0,
+    wallRoughness: 1.0,
   }
 };
 
@@ -72,4 +81,4 @@ export const FIXTURE_DATA: Record<string, any> = {
   FAN: { dimensions: { width: 1.2, depth: 1.2, height: 0.2 }, color: '#f8fafc' }
 };
 
-export const GRID_SIZE = 0.05; 
+export const GRID_SIZE = 0.05;

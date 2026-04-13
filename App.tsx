@@ -8,7 +8,7 @@ import { INITIAL_ROOM, FURNITURE_DATA, GRID_SIZE, THEMES } from './constants.ts'
 import { FurnitureType, PlacedItem, AppState, RoomConfig, AppMode } from './types.ts';
 import { FurnitureModel } from './components/FurnitureModels.tsx';
 // Fix: Added 'Bot' to the lucide-react import list
-import { Plus, Trash2, Save, Home, Eye, Footprints, Settings2, Move, Loader2, Maximize2, Send, X, MessageSquare, CheckCircle2, RotateCw, Bot } from 'lucide-react';
+import { Plus, Trash2, Save, Home, Eye, Footprints, Settings2, Move, Loader2, Maximize2, Send, X, MessageSquare, CheckCircle2, RotateCw, Bot, Wind } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'hostel_planner_v32_suggestions_fix';
 const Y_EPSILON = 0.002; 
@@ -103,9 +103,9 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
   );
 });
 
-const POVControls = ({ joystickVector }: { joystickVector: { x: number, y: number } }) => {
+const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number, y: number }, isFlying: boolean }) => {
   const { camera, gl } = useThree();
-  const moveState = useRef({ forward: false, backward: false, left: false, right: false });
+  const moveState = useRef({ forward: false, backward: false, left: false, right: false, up: false, down: false });
   const isPointerDown = useRef(false);
   const velocity = useRef(new THREE.Vector3());
   const direction = useRef(new THREE.Vector3());
@@ -117,12 +117,16 @@ const POVControls = ({ joystickVector }: { joystickVector: { x: number, y: numbe
       if (e.code === 'KeyS') moveState.current.backward = true;
       if (e.code === 'KeyA') moveState.current.left = true;
       if (e.code === 'KeyD') moveState.current.right = true;
+      if (e.code === 'Space') moveState.current.up = true;
+      if (e.code === 'ShiftLeft') moveState.current.down = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'KeyW') moveState.current.forward = false;
       if (e.code === 'KeyS') moveState.current.backward = false;
       if (e.code === 'KeyA') moveState.current.left = false;
       if (e.code === 'KeyD') moveState.current.right = false;
+      if (e.code === 'Space') moveState.current.up = false;
+      if (e.code === 'ShiftLeft') moveState.current.down = false;
     };
     
     const onPointerDown = () => { isPointerDown.current = true; };
@@ -154,24 +158,48 @@ const POVControls = ({ joystickVector }: { joystickVector: { x: number, y: numbe
   }, [gl, camera, euler]);
 
   useFrame((state, delta) => {
-    const friction = 12.0;
-    const speed = 1.4;
+    const friction = isFlying ? 8.0 : 12.0;
+    const speed = isFlying ? 2.5 : 1.4;
     const d = Math.min(delta, 0.1);
+
     velocity.current.x -= velocity.current.x * friction * d;
+    velocity.current.y -= velocity.current.y * friction * d;
     velocity.current.z -= velocity.current.z * friction * d;
+
     direction.current.z = Number(moveState.current.forward) - Number(moveState.current.backward) || -joystickVector.y;
     direction.current.x = Number(moveState.current.right) - Number(moveState.current.left) || joystickVector.x;
+    direction.current.y = Number(moveState.current.up) - Number(moveState.current.down);
+    
     direction.current.normalize();
-    if (moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right || Math.abs(joystickVector.x) > 0.1 || Math.abs(joystickVector.y) > 0.1) {
+
+    if (moveState.current.forward || moveState.current.backward || moveState.current.left || moveState.current.right || 
+        moveState.current.up || moveState.current.down || 
+        Math.abs(joystickVector.x) > 0.1 || Math.abs(joystickVector.y) > 0.1) {
       velocity.current.z -= direction.current.z * speed * 50.0 * d;
       velocity.current.x -= direction.current.x * speed * 50.0 * d;
+      velocity.current.y += direction.current.y * speed * 50.0 * d;
     }
-    camera.translateX(-velocity.current.x * d);
-    camera.translateZ(velocity.current.z * d);
-    const walkPhase = state.clock.elapsedTime * 8;
-    camera.position.y = 1.65 + Math.sin(walkPhase) * (velocity.current.length() * 0.015);
+
+    if (isFlying) {
+      // In Fly mode, we move relative to the camera's full rotation
+      camera.translateZ(velocity.current.z * d);
+      camera.translateX(-velocity.current.x * d);
+      // Explicit Y movement (Space/Shift)
+      camera.position.y += velocity.current.y * d;
+    } else {
+      // In Walk mode, we translate but lock Y
+      camera.translateX(-velocity.current.x * d);
+      camera.translateZ(velocity.current.z * d);
+      
+      const walkPhase = state.clock.elapsedTime * 8;
+      const bobAmount = velocity.current.length() > 0.1 ? Math.sin(walkPhase) * (velocity.current.length() * 0.015) : 0;
+      camera.position.y = 1.65 + bobAmount;
+    }
+
+    // Room boundaries clamping
     camera.position.x = Math.max(-3.4, Math.min(3.4, camera.position.x));
     camera.position.z = Math.max(-4.2, Math.min(1.5, camera.position.z));
+    camera.position.y = Math.max(0.1, Math.min(2.7, camera.position.y));
   });
   return null;
 };
@@ -223,6 +251,7 @@ export default function App() {
   const [joystickVector, setJoystickVector] = useState({ x: 0, y: 0 });
   const [isAutoPlanning, setIsAutoPlanning] = useState(false);
   const [showPOVOverlay, setShowPOVOverlay] = useState(true);
+  const [isFlying, setIsFlying] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([{ role: 'model', text: "Architectural Lead ready. I specialize in high-density hostel planning (Bunk Beds = 2 residents). I'll ensure clear pathways and ergonomic zoning." }]);
   const [chatInput, setChatInput] = useState('');
@@ -504,11 +533,43 @@ OUTPUT FORMAT:
 
         {state.mode === 'pov' && (
           <>
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 flex bg-neutral-900/80 backdrop-blur-3xl rounded-2xl p-1 shadow-2xl border border-white/10">
+              <button 
+                onClick={() => setIsFlying(false)} 
+                className={`px-4 py-2 rounded-xl flex items-center gap-2 text-[9px] font-black transition-all ${!isFlying ? 'bg-blue-600 text-white' : 'text-white/40'}`}
+              >
+                <Footprints size={12} /> WALK
+              </button>
+              <button 
+                onClick={() => setIsFlying(true)} 
+                className={`px-4 py-2 rounded-xl flex items-center gap-2 text-[9px] font-black transition-all ${isFlying ? 'bg-blue-600 text-white' : 'text-white/40'}`}
+              >
+                <Wind size={12} /> FLY
+              </button>
+            </div>
             {showPOVOverlay && (
               <div onClick={enterPOV} className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center cursor-pointer animate-in zoom-in-95 duration-500">
                 <Maximize2 size={80} className="text-blue-500 mb-6 animate-pulse" />
-                <h2 className="text-2xl font-black text-white tracking-widest uppercase text-center px-6">Explore Your Space<br/>Drag to Look • WASD to Move</h2>
-                <p className="text-white/30 text-[10px] font-black mt-6 tracking-[0.4em]">CLICK TO INITIALIZE</p>
+                <h2 className="text-2xl font-black text-white tracking-widest uppercase text-center px-6">Explore Your Space</h2>
+                <div className="grid grid-cols-2 gap-8 mt-10">
+                  <div className="text-center">
+                    <p className="text-blue-500 text-[10px] font-black mb-2 tracking-widest uppercase">Movement</p>
+                    <p className="text-white/60 text-xs">WASD • Joystick</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-blue-500 text-[10px] font-black mb-2 tracking-widest uppercase">Look</p>
+                    <p className="text-white/60 text-xs">Mouse • Drag</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-emerald-500 text-[10px] font-black mb-2 tracking-widest uppercase">Fly Up</p>
+                    <p className="text-white/60 text-xs">Space</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-emerald-500 text-[10px] font-black mb-2 tracking-widest uppercase">Fly Down</p>
+                    <p className="text-white/60 text-xs">Shift</p>
+                  </div>
+                </div>
+                <p className="text-white/30 text-[10px] font-black mt-12 tracking-[0.4em]">CLICK TO INITIALIZE</p>
               </div>
             )}
             <Joystick onMove={setJoystickVector} />
@@ -519,7 +580,7 @@ OUTPUT FORMAT:
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           {state.mode === 'pov' ? (
-            <><PerspectiveCamera makeDefault position={[0, 1.65, 2.5]} fov={60} /><POVControls joystickVector={joystickVector} /></>
+            <><PerspectiveCamera makeDefault position={[0, 1.65, 2.5]} fov={60} /><POVControls joystickVector={joystickVector} isFlying={isFlying} /></>
           ) : (
             <><PerspectiveCamera makeDefault position={state.is2D ? [0, 15, 0] : [10, 10, 10]} fov={state.is2D ? 25 : 45} /><OrbitControls enabled={!isDraggingAny} enableRotate={!state.is2D} maxPolarAngle={Math.PI / 2.1} minDistance={2} maxDistance={40} target={[0, 0, 0]} /></>
           )}
@@ -528,8 +589,10 @@ OUTPUT FORMAT:
           <directionalLight position={[15, 30, 15]} intensity={1.5} castShadow shadow-mapSize={[2048, 2048]} />
           
           <Environment resolution={256}>
-            <Lightformer intensity={3} rotation-x={Math.PI / 2} position={[0, 5, -5]} scale={[10, 10, 1]} />
-            <Lightformer intensity={3} rotation-x={Math.PI / 2} position={[0, 5, 5]} scale={[10, 10, 1]} />
+            <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -5]} scale={[10, 10, 1]} />
+            <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, 5]} scale={[10, 10, 1]} />
+            <Lightformer intensity={2} rotation-y={Math.PI / 2} position={[-5, 2, 0]} scale={[10, 5, 1]} />
+            <Lightformer intensity={2} rotation-y={-Math.PI / 2} position={[5, 2, 0]} scale={[10, 5, 1]} />
           </Environment>
 
           <RoomStructure theme={theme} showGrid={state.showGrid && state.mode === 'edit'} config={state.room} onDeselect={() => setState(p => ({ ...p, selectedId: null }))} mode={state.mode} />
@@ -564,14 +627,49 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
   const { width, depth, height } = config;
   const bathDepth = 1.25, balconyDepth = 1.0;
   const wallThickness = 0.15;
-  const wallMat = useMemo(() => new THREE.MeshStandardMaterial({ color: theme.wall, roughness: 0.9, metalness: 0.1 }), [theme.wall]);
-  const floorMat = useMemo(() => new THREE.MeshStandardMaterial({ color: theme.floor, roughness: 0.8, metalness: 0.05 }), [theme.floor]);
+  
+  // High fidelity PBR materials for room
+  const wallMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
+    color: theme.wall, 
+    roughness: theme.wallRoughness || 0.9, 
+    metalness: 0,
+    clearcoat: 0.05,
+  }), [theme.wall, theme.wallRoughness]);
+
+  const floorMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
+    color: theme.floor, 
+    roughness: theme.floorRoughness || 0.1, 
+    metalness: theme.floorMetalness || 0,
+    clearcoat: 0.3,
+    reflectivity: 0.5,
+    envMapIntensity: 1.5,
+  }), [theme.floor, theme.floorRoughness, theme.floorMetalness]);
+
+  const tileMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
+    color: '#cbd5e1', 
+    roughness: 0.05, 
+    metalness: 0.1,
+    clearcoat: 1.0,
+    reflectivity: 1.0,
+  }), []);
 
   return (
     <group onPointerMissed={onDeselect}>
-      <mesh position={[0, -0.01, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow material={floorMat}><planeGeometry args={[width, depth]} /></mesh>
-      <mesh position={[0, -0.01, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, bathDepth]} /><meshStandardMaterial color="#cbd5e1" roughness={0.4} /></mesh>
-      <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow><planeGeometry args={[width, balconyDepth]} /><meshStandardMaterial color="#334155" roughness={1} /></mesh>
+      {/* Main Floor */}
+      <mesh position={[0, -0.01, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow material={floorMat}>
+        <planeGeometry args={[width, depth]} />
+      </mesh>
+      
+      {/* Bathroom Floor */}
+      <mesh position={[0, -0.01, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow material={tileMat}>
+        <planeGeometry args={[width, bathDepth]} />
+      </mesh>
+      
+      {/* Balcony Floor */}
+      <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+        <planeGeometry args={[width, balconyDepth]} />
+        <meshStandardMaterial color="#334155" roughness={1} />
+      </mesh>
       
       {mode === 'edit' && (
         <group position={[0, 0.05, 0]}>
@@ -583,14 +681,23 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
       {showGrid && (<Grid infiniteGrid fadeDistance={20} fadeStrength={5} sectionSize={1} cellSize={GRID_SIZE} sectionColor={theme.accent} cellColor={theme.grid} position={[0, 0.01, 0]} />)}
       
       <group>
+        {/* Front Wall */}
         <mesh position={[- (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.07, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.07, height, wallThickness]} /></mesh>
+        
+        {/* Side Walls */}
         <mesh position={[-width/2, height/2, -bathDepth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[wallThickness, height, depth + bathDepth]} /></mesh>
         <mesh position={[width/2, height/2, -bathDepth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[wallThickness, height, depth + bathDepth]} /></mesh>
+        
+        {/* Partition Wall */}
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
+        
+        {/* Back Wall (Balcony entrance) */}
         <mesh position={[- (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
+        
+        {/* Railing */}
         <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]}><boxGeometry args={[width, 1.2, 0.02]} /><meshStandardMaterial color="#94a3b8" transparent opacity={0.4} /></mesh>
       </group>
     </group>
