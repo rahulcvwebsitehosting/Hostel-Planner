@@ -13,7 +13,7 @@ import { Plus, Trash2, Save, Home, Eye, Footprints, Settings2, Move, Loader2, Ma
 const LOCAL_STORAGE_KEY = 'hostel_planner_v32_suggestions_fix';
 const Y_EPSILON = 0.002; 
 const WALL_THICKNESS = 0.15;
-const generateId = () => Math.random().toString(36).substr(2, 9);
+const generateId = () => Math.random().toString(36).substring(2, 11);
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -59,6 +59,7 @@ interface DraggableProps {
 const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect, onDrag, onDragStart, onDragEnd }: DraggableProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const floorPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const animRef = useRef<THREE.Group>(null);
 
   const handlePointerDown = (e: any) => {
     if (mode !== 'edit') return;
@@ -84,6 +85,30 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
     onDrag([point.x, Y_EPSILON, point.z]);
   };
 
+  // Initialize with small scale to trigger entrance popping
+  useEffect(() => {
+    if (animRef.current) {
+      animRef.current.scale.set(0.15, 0.15, 0.15);
+    }
+  }, []);
+
+  useFrame((state, delta) => {
+    if (animRef.current) {
+      // Smooth scale spring up
+      animRef.current.scale.x = THREE.MathUtils.lerp(animRef.current.scale.x, 1, delta * 8.5);
+      animRef.current.scale.y = THREE.MathUtils.lerp(animRef.current.scale.y, 1, delta * 8.5);
+      animRef.current.scale.z = THREE.MathUtils.lerp(animRef.current.scale.z, 1, delta * 8.5);
+
+      // Selected floating effect
+      if (selected && mode === 'edit') {
+        const floatY = Math.sin(state.clock.getElapsedTime() * 4.5) * 0.05 + 0.05;
+        animRef.current.position.y = THREE.MathUtils.lerp(animRef.current.position.y, floatY, delta * 8);
+      } else {
+        animRef.current.position.y = THREE.MathUtils.lerp(animRef.current.position.y, 0, delta * 8);
+      }
+    }
+  });
+
   return (
     <group
       position={[item.position[0], item.position[1] + Y_EPSILON, item.position[2]]}
@@ -92,13 +117,15 @@ const DraggableFurniture = memo(({ item, selected, hasCollision, mode, onSelect,
       onPointerUp={handlePointerUp}
       onPointerMove={handlePointerMove}
     >
-      <FurnitureModel type={item.type} selected={selected && mode === 'edit'} hasCollision={hasCollision && mode === 'edit'} isRealistic={mode === 'pov' || mode === 'view'} />
-      {selected && mode === 'edit' && (
-        <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.01, 0]}>
-          <planeGeometry args={[FURNITURE_DATA[item.type].dimensions.width + 0.1, FURNITURE_DATA[item.type].dimensions.depth + 0.1]} />
-          <meshBasicMaterial color={hasCollision ? "#ef4444" : "#3B82F6"} transparent opacity={0.3} />
-        </mesh>
-      )}
+      <group ref={animRef}>
+        <FurnitureModel type={item.type} selected={selected && mode === 'edit'} hasCollision={hasCollision && mode === 'edit'} isRealistic={mode === 'pov' || mode === 'view'} />
+        {selected && mode === 'edit' && (
+          <mesh rotation={[-Math.PI/2, 0, 0]} position={[0, 0.01, 0]}>
+            <planeGeometry args={[FURNITURE_DATA[item.type].dimensions.width + 0.1, FURNITURE_DATA[item.type].dimensions.depth + 0.1]} />
+            <meshBasicMaterial color={hasCollision ? "#ef4444" : "#3B82F6"} transparent opacity={0.3} />
+          </mesh>
+        )}
+      </group>
     </group>
   );
 });
@@ -129,14 +156,24 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
       if (e.code === 'ShiftLeft') moveState.current.down = false;
     };
     
-    const onPointerDown = () => { isPointerDown.current = true; };
+    const lastPos = useRef({ x: 0, y: 0 });
+
+    const onPointerDown = (e: PointerEvent) => { 
+      isPointerDown.current = true; 
+      lastPos.current = { x: e.clientX, y: e.clientY };
+    };
     const onPointerUp = () => { isPointerDown.current = false; };
     const onMove = (e: PointerEvent) => {
       if (document.pointerLockElement || isPointerDown.current) {
+        const movementX = document.pointerLockElement ? e.movementX : (e.clientX - lastPos.current.x);
+        const movementY = document.pointerLockElement ? e.movementY : (e.clientY - lastPos.current.y);
+        
+        lastPos.current = { x: e.clientX, y: e.clientY };
+
         euler.setFromQuaternion(camera.quaternion);
         const sensitivity = 0.003;
-        euler.y -= e.movementX * sensitivity;
-        euler.x -= e.movementY * sensitivity;
+        euler.y -= movementX * sensitivity;
+        euler.x -= movementY * sensitivity;
         euler.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, euler.x));
         camera.quaternion.setFromEuler(euler);
       }
@@ -180,6 +217,9 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
       velocity.current.y += direction.current.y * speed * 50.0 * d;
     }
 
+    const prevX = camera.position.x;
+    const prevZ = camera.position.z;
+
     if (isFlying) {
       // In Fly mode, we move relative to the camera's full rotation
       camera.translateZ(velocity.current.z * d);
@@ -196,9 +236,28 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
       camera.position.y = 1.65 + bobAmount;
     }
 
+    // Wall collision checking:
+    // 1. Partition wall is at Z = -1.765. Solid parts are at |X| > 0.70.
+    const partitionZ = -1.765;
+    const wallMargin = 0.12; // safety margin
+    if (Math.abs(camera.position.x) > 0.70) {
+      if (prevZ > partitionZ + wallMargin && camera.position.z < partitionZ + wallMargin) {
+        camera.position.z = partitionZ + wallMargin;
+      } else if (prevZ < partitionZ - wallMargin && camera.position.z > partitionZ - wallMargin) {
+        camera.position.z = partitionZ - wallMargin;
+      }
+    }
+
+    // Sideways collision for partition wall:
+    if (Math.abs(camera.position.z - partitionZ) < wallMargin && Math.abs(camera.position.x) > 0.70) {
+      if (Math.abs(prevX) <= 0.70) {
+        camera.position.x = Math.sign(camera.position.x) * 0.70;
+      }
+    }
+
     // Room boundaries clamping
     camera.position.x = Math.max(-3.4, Math.min(3.4, camera.position.x));
-    camera.position.z = Math.max(-4.2, Math.min(1.5, camera.position.z));
+    camera.position.z = Math.max(-3.9, Math.min(1.5, camera.position.z));
     camera.position.y = Math.max(0.1, Math.min(2.7, camera.position.y));
   });
   return null;
@@ -206,14 +265,21 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
 
 const Joystick = memo(({ onMove }: { onMove: (v: { x: number, y: number }) => void }) => {
   const [pos, setPos] = useState({ x: 0, y: 0 });
-  const handleTouch = (e: any) => {
+  const isDragging = useRef(false);
+
+  const handlePointerDown = (e: any) => {
+    isDragging.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    handlePointerMove(e);
+  };
+
+  const handlePointerMove = (e: any) => {
+    if (!isDragging.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    let dx = clientX - centerX;
-    let dy = clientY - centerY;
+    let dx = e.clientX - centerX;
+    let dy = e.clientY - centerY;
     const distance = Math.sqrt(dx*dx + dy*dy);
     const maxRadius = 40;
     if (distance > maxRadius) {
@@ -223,10 +289,19 @@ const Joystick = memo(({ onMove }: { onMove: (v: { x: number, y: number }) => vo
     setPos({ x: dx, y: dy });
     onMove({ x: dx / maxRadius, y: dy / maxRadius });
   };
-  const reset = () => { setPos({ x: 0, y: 0 }); onMove({ x: 0, y: 0 }); };
+
+  const reset = (e?: any) => {
+    isDragging.current = false;
+    if (e && e.currentTarget && e.pointerId) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setPos({ x: 0, y: 0 });
+    onMove({ x: 0, y: 0 });
+  };
+
   return (
     <div className="fixed bottom-12 left-12 w-28 h-28 bg-white/10 backdrop-blur-3xl rounded-full border border-white/20 z-[60] flex items-center justify-center touch-none select-none shadow-2xl"
-      onPointerMove={handleTouch} onPointerUp={reset} onPointerLeave={reset}>
+      onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={reset} onPointerCancel={reset}>
       <div className="w-14 h-14 bg-blue-600/80 rounded-full shadow-lg flex items-center justify-center pointer-events-none"
         style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}>
         <Move size={24} className="text-white" />
@@ -256,6 +331,12 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([{ role: 'model', text: "Architectural Lead ready. I specialize in high-density hostel planning (Bunk Beds = 2 residents). I'll ensure clear pathways and ergonomic zoning." }]);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -285,7 +366,7 @@ export default function App() {
     const { w, d } = getEffectiveDims(type, rotation);
     const roomHalfWidth = 3.65;
     const roomFrontZ = 1.765;
-    const roomBackZ = -3.015;
+    const roomBackZ = -1.765; // Corrected to restrict equipment/furniture to the Main Room (not going through partition wall)
     const limitX = roomHalfWidth - (w / 2) - WALL_THICKNESS;
     const limitZFront = roomFrontZ - (d / 2) - WALL_THICKNESS;
     const limitZBack = roomBackZ + (d / 2) + WALL_THICKNESS;
@@ -333,7 +414,6 @@ export default function App() {
     setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsAutoPlanning(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const prompt = `You are a professional Interior Architect specializing in Hostel Micro-Apartments.
 ROOM CONTEXT:
 - Main Floor: 7.3m wide (X: -3.65 to 3.65) x 3.53m deep (Z: -1.765 to 1.765).
@@ -359,17 +439,23 @@ OUTPUT FORMAT:
 <text>Professional summary of the layout logic (Zoning, Circulation, Privacy).</text>
 <json>[{"type": "ID", "position": [x, 0, z], "rotation": radians}, ...]</json>`;
       
-      const response = await ai.models.generateContent({ 
-        model: "gemini-3-pro-preview", 
-        contents: `Request: ${userMsg}. Constraints: ${prompt}`,
-        config: { thinkingConfig: { thinkingBudget: 16384 } } 
+      const res = await fetch('/api/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userMsg, prompt })
       });
       
-      const rawText = response.text || '';
+      if (!res.ok) {
+        throw new Error("Server Error");
+      }
+      
+      const data = await res.json();
+      const rawText = data.text || '';
       const aiText = rawText.match(/<text>([\s\S]*?)<\/text>/)?.[1].trim() || "Spatial proposal ready for review.";
       
       let suggestion: PlacedItem[] | undefined = undefined;
-      const jsonMatch = rawText.match(/<json>([\s\S]*?)<\/json>/) || rawText.match(/(\[[\s\S]*?\])/);
+      // Match markdown json blocks or raw json blocks
+      const jsonMatch = rawText.match(/```json\n([\s\S]*?)\n```/) || rawText.match(/<json>([\s\S]*?)<\/json>/) || rawText.match(/(\[[\s\S]*?\])/);
       
       if (jsonMatch) {
         try {
@@ -433,6 +519,14 @@ OUTPUT FORMAT:
 
   return (
     <div className="flex h-screen bg-neutral-950 flex-col md:flex-row overflow-hidden font-sans select-none text-white">
+      {toast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[150] pointer-events-none animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="bg-emerald-600/90 backdrop-blur-xl border border-emerald-500/20 text-white font-bold tracking-wide text-xs px-6 py-3.5 rounded-full shadow-[0_15px_40px_rgba(16,185,129,0.3)] flex items-center gap-2.5 uppercase">
+            <CheckCircle2 size={16} className="text-emerald-200 animate-pulse" />
+            {toast}
+          </div>
+        </div>
+      )}
       {isAutoPlanning && (
         <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-500">
           <Loader2 size={48} className="animate-spin text-blue-500 mb-6" />
@@ -441,7 +535,7 @@ OUTPUT FORMAT:
         </div>
       )}
 
-      <aside className={`w-full md:w-80 bg-white border-r border-neutral-200 flex flex-col z-20 shadow-2xl transition-transform duration-500 ${state.mode !== 'edit' ? '-translate-x-full md:absolute' : 'translate-x-0'}`}>
+      <aside className={`fixed inset-x-0 bottom-0 h-[45vh] md:h-full md:relative md:w-80 bg-white border-t md:border-t-0 md:border-r border-neutral-200 flex flex-col z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] md:shadow-2xl transition-transform duration-500 ${state.mode !== 'edit' ? 'translate-y-full md:translate-y-0 md:-translate-x-full' : 'translate-y-0'}`}>
         <div className="p-6 border-b border-neutral-100 flex items-center gap-3">
           <div className="p-2.5 bg-blue-600 rounded-xl text-white shadow-xl shadow-blue-500/20"><Home size={20}/></div>
           <h1 className="text-lg font-bold text-neutral-900 leading-none">StudioPlanner</h1>
@@ -477,7 +571,7 @@ OUTPUT FORMAT:
           )}
         </div>
         <div className="p-6 border-t border-neutral-100">
-          <button onClick={() => { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); alert("Spatial Draft Saved."); }} className="w-full py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black transition-all flex items-center justify-center gap-2"><Save size={16}/> COMMIT DRAFT</button>
+          <button onClick={() => { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); showToast("Spatial Draft Committed"); }} className="w-full py-3 bg-neutral-900 text-white rounded-xl font-bold hover:bg-black transition-all flex items-center justify-center gap-2"><Save size={16}/> COMMIT DRAFT</button>
         </div>
       </aside>
 
@@ -525,10 +619,10 @@ OUTPUT FORMAT:
           </div>
         </div>
 
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex bg-neutral-900/80 backdrop-blur-3xl rounded-2xl p-1 shadow-2xl border border-white/10">
-          <button onClick={() => setState(p => ({ ...p, mode: 'edit' }))} className={`px-6 py-2.5 rounded-xl flex items-center gap-2 text-[10px] font-black transition-all ${state.mode === 'edit' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Settings2 size={14} /> DRAFT</button>
-          <button onClick={() => setState(p => ({ ...p, mode: 'view' }))} className={`px-6 py-2.5 rounded-xl flex items-center gap-2 text-[10px] font-black transition-all ${state.mode === 'view' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Eye size={14} /> RENDER</button>
-          <button onClick={() => setState(p => ({ ...p, mode: 'pov' }))} className={`px-6 py-2.5 rounded-xl flex items-center gap-2 text-[10px] font-black transition-all ${state.mode === 'pov' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Footprints size={14} /> WALK</button>
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex bg-neutral-900/80 backdrop-blur-3xl rounded-2xl p-1 shadow-2xl border border-white/10 w-max max-w-[90vw]">
+          <button onClick={() => setState(p => ({ ...p, mode: 'edit' }))} className={`px-3 md:px-6 py-2.5 rounded-xl flex items-center gap-1 md:gap-2 text-[10px] font-black transition-all ${state.mode === 'edit' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Settings2 size={14} /> DRAFT</button>
+          <button onClick={() => setState(p => ({ ...p, mode: 'view' }))} className={`px-3 md:px-6 py-2.5 rounded-xl flex items-center gap-1 md:gap-2 text-[10px] font-black transition-all ${state.mode === 'view' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Eye size={14} /> RENDER</button>
+          <button onClick={() => setState(p => ({ ...p, mode: 'pov' }))} className={`px-3 md:px-6 py-2.5 rounded-xl flex items-center gap-1 md:gap-2 text-[10px] font-black transition-all ${state.mode === 'pov' ? 'bg-blue-600 text-white' : 'text-white/40'}`}><Footprints size={14} /> WALK</button>
         </div>
 
         {state.mode === 'pov' && (
@@ -576,17 +670,33 @@ OUTPUT FORMAT:
           </>
         )}
 
-        <Canvas shadows gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
+        <Canvas gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
+          <color attach="background" args={["#000000"]} />
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           {state.mode === 'pov' ? (
             <><PerspectiveCamera makeDefault position={[0, 1.65, 2.5]} fov={60} /><POVControls joystickVector={joystickVector} isFlying={isFlying} /></>
           ) : (
-            <><PerspectiveCamera makeDefault position={state.is2D ? [0, 15, 0] : [10, 10, 10]} fov={state.is2D ? 25 : 45} /><OrbitControls enabled={!isDraggingAny} enableRotate={!state.is2D} maxPolarAngle={Math.PI / 2.1} minDistance={2} maxDistance={40} target={[0, 0, 0]} /></>
+            <>
+              <PerspectiveCamera 
+                makeDefault 
+                position={state.is2D ? [0, 15, 0] : [9, 13, 11]} 
+                fov={state.is2D ? 25 : 22} 
+              />
+              <OrbitControls 
+                enabled={!isDraggingAny} 
+                enableRotate={!state.is2D} 
+                minPolarAngle={Math.PI / 4.5}
+                maxPolarAngle={Math.PI / 2.15} 
+                minDistance={5} 
+                maxDistance={35} 
+                target={[0, 0.5, -0.8]} 
+              />
+            </>
           )}
           
-          <ambientLight intensity={state.mode === 'edit' ? 0.8 : 0.3} />
-          <directionalLight position={[15, 30, 15]} intensity={1.5} castShadow shadow-mapSize={[2048, 2048]} />
+          <ambientLight intensity={state.mode === 'edit' ? 2.2 : 2.0} />
+          <directionalLight position={[8, 16, 12]} intensity={0.6} />
           
           <Environment resolution={256}>
             <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -5]} scale={[10, 10, 1]} />
@@ -611,8 +721,6 @@ OUTPUT FORMAT:
               onDragEnd={() => setIsDraggingAny(false)} 
             />
           ))}
-          
-          <ContactShadows resolution={1024} scale={20} blur={2.5} opacity={0.5} far={10} color="#000" />
         </Canvas>
       </main>
       <style>{`
@@ -623,35 +731,390 @@ OUTPUT FORMAT:
   );
 }
 
+const EntranceDoor = memo(({ wallThickness, height, gapWidth, zPosition, isRealistic, mode }: { wallThickness: number, height: number, gapWidth: number, zPosition: number, isRealistic: boolean, mode: AppMode }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const doorRef = useRef<THREE.Group>(null);
+  
+  useEffect(() => {
+    if (mode === 'pov') {
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  }, [mode]);
+
+  useFrame((state, delta) => {
+    if (doorRef.current) {
+      const targetAngle = isOpen ? -Math.PI / 1.85 : 0;
+      doorRef.current.rotation.y = THREE.MathUtils.lerp(doorRef.current.rotation.y, targetAngle, delta * 5.5);
+    }
+  });
+
+  const woodTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    // Warm rich oak/walnut base matching luxury wood door in the reference
+    ctx.fillStyle = '#84563c';
+    ctx.fillRect(0, 0, 256, 512);
+    ctx.strokeStyle = '#53321e';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.45;
+    for (let i = 0; i < 512; i += 8) {
+      ctx.beginPath();
+      let x = 0;
+      ctx.moveTo(x, i);
+      while (x <= 256) {
+        ctx.lineTo(x, i + Math.sin(x * 0.03) * 6);
+        x += 15;
+      }
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    return tex;
+  }, []);
+
+  const doorMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#ffffff',
+    map: woodTexture,
+    roughness: 0.35,
+    metalness: 0.05,
+    clearcoat: 0.3,
+  }), [woodTexture]);
+
+  const casingMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#ffffff',
+    map: woodTexture,
+    roughness: 0.4,
+    metalness: 0.02,
+    clearcoat: 0.15,
+  }), [woodTexture]);
+
+  const handleMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#e2a85c', // Polished warm brass
+    metalness: 1.0,
+    roughness: 0.1,
+    clearcoat: 1.0,
+  }), []);
+
+  const glassMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#f8fafc',
+    transparent: true,
+    opacity: 0.5,
+    transmission: 0.85,
+    roughness: 0.2,
+    thickness: 0.02,
+  }), []);
+
+  // Compute door leaf dimensions to create a physical glass slit cutout:
+  const doorWidth = gapWidth - 0.02;
+  const doorHeight = height - 0.05;
+  const slitWidth = 0.16;
+  const sidePanelWidth = (doorWidth - slitWidth) / 2; // (1.14 - 0.16) / 2 = 0.49
+  const slitHeight = doorHeight - 0.7; // leaves 0.3 at bottom and 0.4 at top
+
+  return (
+    <group position={[-gapWidth / 2, 0, zPosition]}>
+      {/* Wooden Door Frame (Casing) - surrounding the gap */}
+      <mesh position={[0, height / 2, 0]} castShadow receiveShadow material={casingMat}>
+        <boxGeometry args={[0.06, height, wallThickness + 0.03]} />
+      </mesh>
+      <mesh position={[gapWidth, height / 2, 0]} castShadow receiveShadow material={casingMat}>
+        <boxGeometry args={[0.06, height, wallThickness + 0.03]} />
+      </mesh>
+      <mesh position={[gapWidth / 2, height - 0.03, 0]} castShadow receiveShadow material={casingMat}>
+        <boxGeometry args={[gapWidth + 0.06, 0.06, wallThickness + 0.03]} />
+      </mesh>
+
+      {/* Rotating Door Leaf */}
+      <group ref={doorRef} onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}>
+        {/* Left Wood Panel */}
+        <mesh position={[sidePanelWidth / 2 + 0.01, doorHeight / 2, 0]} castShadow receiveShadow material={doorMat}>
+          <boxGeometry args={[sidePanelWidth, doorHeight, 0.04]} />
+        </mesh>
+        {/* Right Wood Panel */}
+        <mesh position={[sidePanelWidth + slitWidth + sidePanelWidth / 2 + 0.01, doorHeight / 2, 0]} castShadow receiveShadow material={doorMat}>
+          <boxGeometry args={[sidePanelWidth, doorHeight, 0.04]} />
+        </mesh>
+        {/* Bottom Rail */}
+        <mesh position={[sidePanelWidth + slitWidth / 2 + 0.01, 0.15, 0]} castShadow receiveShadow material={doorMat}>
+          <boxGeometry args={[slitWidth, 0.3, 0.04]} />
+        </mesh>
+        {/* Top Rail */}
+        <mesh position={[sidePanelWidth + slitWidth / 2 + 0.01, doorHeight - 0.2, 0]} castShadow receiveShadow material={doorMat}>
+          <boxGeometry args={[slitWidth, 0.4, 0.04]} />
+        </mesh>
+        {/* Central Frosted Glass Slit */}
+        <mesh position={[sidePanelWidth + slitWidth / 2 + 0.01, 0.3 + slitHeight / 2, 0]} castShadow material={glassMat}>
+          <boxGeometry args={[slitWidth, slitHeight, 0.015]} />
+        </mesh>
+
+        {/* Golden Door Handle Assembly (Front & Back) */}
+        <group position={[doorWidth - 0.12, doorHeight / 2, 0.03]}>
+          <mesh material={handleMat} castShadow>
+            <cylinderGeometry args={[0.01, 0.01, 0.12, 12]} />
+          </mesh>
+          <mesh position={[0, 0, -0.03]} material={handleMat}>
+            <cylinderGeometry args={[0.006, 0.006, 0.04, 12]} rotation={[Math.PI / 2, 0, 0]} />
+          </mesh>
+        </group>
+        <group position={[doorWidth - 0.12, doorHeight / 2, -0.03]}>
+          <mesh material={handleMat} castShadow>
+            <cylinderGeometry args={[0.01, 0.01, 0.12, 12]} />
+          </mesh>
+          <mesh position={[0, 0, 0.03]} material={handleMat}>
+            <cylinderGeometry args={[0.006, 0.006, 0.04, 12]} rotation={[Math.PI / 2, 0, 0]} />
+          </mesh>
+        </group>
+      </group>
+    </group>
+  );
+});
+
+const SlidingGlassDoor = memo(({ height, gapWidth, zPosition, isRealistic }: { height: number, gapWidth: number, zPosition: number, isRealistic: boolean }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const slideRef = useRef<THREE.Group>(null);
+
+  useFrame((state, delta) => {
+    if (slideRef.current) {
+      // Slides left by half of the gap width (overlapping the left fixed panel)
+      const targetX = isOpen ? -gapWidth / 2 : 0;
+      slideRef.current.position.x = THREE.MathUtils.lerp(slideRef.current.position.x, targetX, delta * 4.5);
+    }
+  });
+
+  const frameMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#18181b', // Sleek black metal frame
+    roughness: 0.2,
+    metalness: 0.85,
+    clearcoat: 0.2,
+  }), []);
+
+  const glassMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#e2e8f0',
+    transparent: true,
+    opacity: 0.3,
+    transmission: 0.9,
+    roughness: 0.1,
+    thickness: 0.02,
+  }), []);
+
+  const trackMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#27272a',
+    roughness: 0.3,
+    metalness: 0.9,
+  }), []);
+
+  const paneWidth = gapWidth / 2;
+
+  return (
+    <group position={[-gapWidth / 2, 0, zPosition]} onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}>
+      {/* Top Runner Track */}
+      <mesh position={[gapWidth / 2, height - 0.025, 0]} material={trackMat} castShadow>
+        <boxGeometry args={[gapWidth + 0.04, 0.05, 0.06]} />
+      </mesh>
+      {/* Bottom Floor Guide Track */}
+      <mesh position={[gapWidth / 2, 0.005, 0]} material={trackMat}>
+        <boxGeometry args={[gapWidth + 0.04, 0.01, 0.06]} />
+      </mesh>
+
+      {/* 1. FIXED GLASS PANEL (Left side of the opening) */}
+      <group position={[paneWidth / 2, height / 2, -0.01]}>
+        {/* Glass Sheet */}
+        <mesh material={glassMat}>
+          <boxGeometry args={[paneWidth - 0.05, height - 0.1, 0.01]} />
+        </mesh>
+        {/* Top/Bottom/Left/Right Frame Borders */}
+        <mesh position={[0, (height - 0.05) / 2 - 0.015, 0]} material={frameMat}>
+          <boxGeometry args={[paneWidth, 0.03, 0.02]} />
+        </mesh>
+        <mesh position={[0, -((height - 0.05) / 2 - 0.015), 0]} material={frameMat}>
+          <boxGeometry args={[paneWidth, 0.03, 0.02]} />
+        </mesh>
+        <mesh position={[-(paneWidth / 2 - 0.015), 0, 0]} material={frameMat}>
+          <boxGeometry args={[0.03, height - 0.05, 0.02]} />
+        </mesh>
+        <mesh position={[paneWidth / 2 - 0.015, 0, 0]} material={frameMat}>
+          <boxGeometry args={[0.03, height - 0.05, 0.02]} />
+        </mesh>
+      </group>
+
+      {/* 2. SLIDING GLASS PANEL (Right side of opening, sliding left) */}
+      <group ref={slideRef} position={[paneWidth + paneWidth / 2, height / 2, 0.01]}>
+        {/* Glass Sheet */}
+        <mesh material={glassMat} castShadow>
+          <boxGeometry args={[paneWidth - 0.05, height - 0.1, 0.01]} />
+        </mesh>
+        {/* Frame borders */}
+        <mesh position={[0, (height - 0.05) / 2 - 0.015, 0]} material={frameMat} castShadow>
+          <boxGeometry args={[paneWidth, 0.03, 0.02]} />
+        </mesh>
+        <mesh position={[0, -((height - 0.05) / 2 - 0.015), 0]} material={frameMat} castShadow>
+          <boxGeometry args={[paneWidth, 0.03, 0.02]} />
+        </mesh>
+        <mesh position={[-(paneWidth / 2 - 0.015), 0, 0]} material={frameMat} castShadow>
+          <boxGeometry args={[0.03, height - 0.05, 0.02]} />
+        </mesh>
+        <mesh position={[paneWidth / 2 - 0.015, 0, 0]} material={frameMat} castShadow>
+          <boxGeometry args={[0.03, height - 0.05, 0.02]} />
+        </mesh>
+
+        {/* Handle on the sliding panel */}
+        <mesh position={[-(paneWidth / 2 - 0.08), 0, 0.015]} material={frameMat} castShadow>
+          <boxGeometry args={[0.02, 0.3, 0.015]} />
+        </mesh>
+        <mesh position={[-(paneWidth / 2 - 0.08), 0, -0.015]} material={frameMat} castShadow>
+          <boxGeometry args={[0.02, 0.3, 0.015]} />
+        </mesh>
+      </group>
+    </group>
+  );
+});
+
 const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { config: RoomConfig, showGrid: boolean, onDeselect: () => void, theme: any, mode: AppMode }) => {
   const { width, depth, height } = config;
   const bathDepth = 1.25, balconyDepth = 1.0;
   const wallThickness = 0.15;
   
-  // High fidelity PBR materials for room
+  // Custom high fidelity textures for floors and walls
+  const wallTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.globalAlpha = 0.12;
+    for (let i = 0; i < 4000; i++) {
+      ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.2, 1.2);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 4);
+    return tex;
+  }, []);
+
+  const floorPlankTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Extremely light desaturated cream/ash-wood base color matching the reference photo
+    ctx.fillStyle = '#f4efe6';
+    ctx.fillRect(0, 0, 1024, 1024);
+    
+    // Board Joint lines - extremely soft desaturated beige
+    ctx.strokeStyle = '#dfd5c8';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6;
+    const plankHeight = 128;
+    for (let y = 0; y <= 1024; y += plankHeight) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(1024, y);
+      ctx.stroke();
+    }
+    
+    for (let i = 0; i < 8; i++) {
+      const y = i * plankHeight;
+      ctx.beginPath();
+      const offset = (i % 2) * 256;
+      for (let x = offset; x <= 1024; x += 512) {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + plankHeight);
+      }
+      ctx.stroke();
+    }
+    
+    // Soft subtle wood grain layers
+    ctx.strokeStyle = '#e8dfd3';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.4;
+    for (let r = 0; r < 8; r++) {
+      const startY = r * plankHeight;
+      for (let l = 0; l < 10; l++) {
+        ctx.beginPath();
+        let x = 0;
+        const yShift = startY + Math.random() * plankHeight;
+        ctx.moveTo(x, yShift);
+        while (x <= 1024) {
+          const y = yShift + Math.sin(x * 0.015) * 3 + Math.cos(x * 0.005) * 8;
+          if (y >= startY && y <= startY + plankHeight) {
+            ctx.lineTo(x, y);
+          }
+          x += 35;
+        }
+        ctx.stroke();
+      }
+    }
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 2);
+    return tex;
+  }, []);
+
+  const tileTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Light, pristine, architectural off-white tiles
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, 512, 512);
+    
+    // Extremely subtle organic noise
+    ctx.fillStyle = '#e2e8f0';
+    ctx.globalAlpha = 0.08;
+    for (let i = 0; i < 150; i++) {
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.5, 1.5);
+    }
+    
+    // Precise, delicate grout lines
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.85;
+    for (let x = 0; x <= 512; x += 128) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 512); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(512, x); ctx.stroke();
+    }
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1.5, 1.5);
+    return tex;
+  }, []);
+
+  // High fidelity PBR materials with zero-shine matte finishes
   const wallMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
-    color: theme.wall, 
-    roughness: theme.wallRoughness || 0.9, 
-    metalness: 0,
-    clearcoat: 0.05,
-  }), [theme.wall, theme.wallRoughness]);
+    color: '#ffffff', // Pure solid white walls matching the CAD presentation look
+    roughness: 1.0, 
+    metalness: 0.0,
+    clearcoat: 0.0,
+  }), []);
 
   const floorMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
-    color: theme.floor, 
-    roughness: theme.floorRoughness || 0.1, 
-    metalness: theme.floorMetalness || 0,
-    clearcoat: 0.3,
-    reflectivity: 0.5,
-    envMapIntensity: 1.5,
-  }), [theme.floor, theme.floorRoughness, theme.floorMetalness]);
+    color: '#ffffff', 
+    map: floorPlankTexture,
+    roughness: 0.95, // High roughness for a completely matte floor as requested
+    metalness: 0.0,
+    clearcoat: 0.0,
+  }), [floorPlankTexture]);
 
   const tileMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
-    color: '#cbd5e1', 
-    roughness: 0.05, 
-    metalness: 0.1,
-    clearcoat: 1.0,
-    reflectivity: 1.0,
-  }), []);
+    color: '#ffffff', 
+    map: tileTexture,
+    roughness: 0.9, // Matte tiles
+    metalness: 0.0,
+    clearcoat: 0.0,
+  }), [tileTexture]);
 
   return (
     <group onPointerMissed={onDeselect}>
@@ -663,12 +1126,6 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
       {/* Bathroom Floor */}
       <mesh position={[0, -0.01, -depth/2 - bathDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow material={tileMat}>
         <planeGeometry args={[width, bathDepth]} />
-      </mesh>
-      
-      {/* Balcony Floor */}
-      <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
-        <planeGeometry args={[width, balconyDepth]} />
-        <meshStandardMaterial color="#334155" roughness={1} />
       </mesh>
       
       {mode === 'edit' && (
@@ -685,6 +1142,16 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
         <mesh position={[- (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.07, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 3.07/2), height/2, depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.07, height, wallThickness]} /></mesh>
         
+        {/* Entrance Door */}
+        <EntranceDoor 
+          wallThickness={wallThickness} 
+          height={height} 
+          gapWidth={1.16} 
+          zPosition={depth/2} 
+          isRealistic={mode === 'view' || mode === 'pov'} 
+          mode={mode} 
+        />
+
         {/* Side Walls */}
         <mesh position={[-width/2, height/2, -bathDepth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[wallThickness, height, depth + bathDepth]} /></mesh>
         <mesh position={[width/2, height/2, -bathDepth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[wallThickness, height, depth + bathDepth]} /></mesh>
@@ -693,12 +1160,42 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
         
+        {/* Sleek architectural HVAC Ventilation Grille near top left of the partition wall */}
+        <group position={[-1.8, height - 0.25, -depth / 2 + wallThickness / 2 + 0.01]}>
+          {/* Black recessed backplate */}
+          <mesh castShadow>
+            <boxGeometry args={[0.8, 0.12, 0.005]} />
+            <meshBasicMaterial color="#09090b" />
+          </mesh>
+          {/* Outer frame */}
+          <mesh position={[0, 0, 0.003]} castShadow>
+            <boxGeometry args={[0.84, 0.16, 0.004]} />
+            <meshPhysicalMaterial color="#e2e8f0" roughness={0.3} />
+          </mesh>
+          {/* Vanes / Grille lines */}
+          {[-0.04, -0.02, 0, 0.02, 0.04].map((y, idx) => (
+            <mesh key={idx} position={[0, y, 0.0045]}>
+              <boxGeometry args={[0.76, 0.006, 0.002]} />
+              <meshBasicMaterial color="#1e293b" />
+            </mesh>
+          ))}
+        </group>
+
         {/* Back Wall (Balcony entrance) */}
         <mesh position={[- (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
+
+        {/* Balcony Floor */}
+        <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+          <planeGeometry args={[width, balconyDepth]} />
+          <meshStandardMaterial color="#475569" roughness={1.0} />
+        </mesh>
         
         {/* Railing */}
-        <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]}><boxGeometry args={[width, 1.2, 0.02]} /><meshStandardMaterial color="#94a3b8" transparent opacity={0.4} /></mesh>
+        <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]} receiveShadow castShadow>
+          <boxGeometry args={[width, 1.2, 0.02]} />
+          <meshStandardMaterial color="#94a3b8" transparent opacity={0.4} />
+        </mesh>
       </group>
     </group>
   );
