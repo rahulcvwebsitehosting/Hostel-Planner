@@ -138,6 +138,13 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
   const direction = useRef(new THREE.Vector3());
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), []);
 
+  // Reset camera orientation on mount to look straight forward into the room (-Z direction)
+  useEffect(() => {
+    camera.rotation.set(0, 0, 0);
+    camera.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
+    euler.set(0, 0, 0);
+  }, [camera, euler]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'KeyW') moveState.current.forward = true;
@@ -252,6 +259,23 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
     if (Math.abs(camera.position.z - partitionZ) < wallMargin && Math.abs(camera.position.x) > 0.70) {
       if (Math.abs(prevX) <= 0.70) {
         camera.position.x = Math.sign(camera.position.x) * 0.70;
+      }
+    }
+
+    // 2. Bathroom back wall is at Z = -3.015. Solid parts are at |X| > 0.40.
+    const backWallZ = -3.015;
+    if (Math.abs(camera.position.x) > 0.40) {
+      if (prevZ > backWallZ + wallMargin && camera.position.z < backWallZ + wallMargin) {
+        camera.position.z = backWallZ + wallMargin;
+      } else if (prevZ < backWallZ - wallMargin && camera.position.z > backWallZ - wallMargin) {
+        camera.position.z = backWallZ - wallMargin;
+      }
+    }
+
+    // Sideways collision for back wall:
+    if (Math.abs(camera.position.z - backWallZ) < wallMargin && Math.abs(camera.position.x) > 0.40) {
+      if (Math.abs(prevX) <= 0.40) {
+        camera.position.x = Math.sign(camera.position.x) * 0.40;
       }
     }
 
@@ -675,7 +699,7 @@ OUTPUT FORMAT:
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           {state.mode === 'pov' ? (
-            <><PerspectiveCamera makeDefault position={[0, 1.65, 2.5]} fov={60} /><POVControls joystickVector={joystickVector} isFlying={isFlying} /></>
+            <><PerspectiveCamera makeDefault position={[0, 1.65, 1.0]} fov={60} /><POVControls joystickVector={joystickVector} isFlying={isFlying} /></>
           ) : (
             <>
               <PerspectiveCamera 
@@ -1092,29 +1116,80 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
     return tex;
   }, []);
 
-  // High fidelity PBR materials with zero-shine matte finishes
+  // High fidelity PBR materials with gorgeous textures and realistic reflections
   const wallMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
-    color: '#ffffff', // Pure solid white walls matching the CAD presentation look
-    roughness: 1.0, 
+    color: '#fafafa', // Warm high-end plaster/linen white
+    map: wallTexture,
+    roughness: 0.85, 
     metalness: 0.0,
-    clearcoat: 0.0,
-  }), []);
+    clearcoat: 0.05,
+  }), [wallTexture]);
 
   const floorMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
     color: '#ffffff', 
     map: floorPlankTexture,
-    roughness: 0.95, // High roughness for a completely matte floor as requested
-    metalness: 0.0,
-    clearcoat: 0.0,
+    roughness: 0.35, // Premium polished look with subtle wood plank reflection
+    metalness: 0.01,
+    clearcoat: 0.25,
+    clearcoatRoughness: 0.2,
   }), [floorPlankTexture]);
 
   const tileMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
     color: '#ffffff', 
     map: tileTexture,
-    roughness: 0.9, // Matte tiles
+    roughness: 0.15, // Smooth reflective tiles for high bathroom realism
     metalness: 0.0,
-    clearcoat: 0.0,
+    clearcoat: 0.7,
+    clearcoatRoughness: 0.1,
   }), [tileTexture]);
+
+  const balconyTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Modern charcoal-grey wood composite decking planks
+    ctx.fillStyle = '#2d3748';
+    ctx.fillRect(0, 0, 512, 512);
+    
+    // Add linear decking lines (vertical planks)
+    ctx.strokeStyle = '#1a202c';
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.85;
+    const spacing = 42;
+    for (let x = 0; x <= 512; x += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
+      ctx.stroke();
+    }
+    
+    // Subtle wood composite grain texture on planks
+    ctx.strokeStyle = '#3d4a5d';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.25;
+    for (let i = 0; i < 512; i += 3) {
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(512, i);
+      ctx.stroke();
+    }
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 2);
+    return tex;
+  }, []);
+
+  const balconyMat = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: '#ffffff',
+    map: balconyTexture,
+    roughness: 0.6,
+    metalness: 0.1,
+    clearcoat: 0.1,
+  }), [balconyTexture]);
 
   return (
     <group onPointerMissed={onDeselect}>
@@ -1181,21 +1256,56 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
           ))}
         </group>
 
-        {/* Back Wall (Balcony entrance) */}
+        {/* Back Wall (Balcony entrance with opening) */}
         <mesh position={[- (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 3.25/2), height/2, -depth/2 - bathDepth]} receiveShadow castShadow material={wallMat}><boxGeometry args={[3.25, height, wallThickness]} /></mesh>
 
-        {/* Balcony Floor */}
-        <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+        {/* Balcony Side Walls */}
+        <mesh position={[-width/2, height/2, -depth/2 - bathDepth - balconyDepth/2]} receiveShadow castShadow material={wallMat}>
+          <boxGeometry args={[wallThickness, height, balconyDepth]} />
+        </mesh>
+        <mesh position={[width/2, height/2, -depth/2 - bathDepth - balconyDepth/2]} receiveShadow castShadow material={wallMat}>
+          <boxGeometry args={[wallThickness, height, balconyDepth]} />
+        </mesh>
+
+        {/* Balcony Floor (Composite Decking) */}
+        <mesh position={[0, -0.01, -depth/2 - bathDepth - balconyDepth/2]} rotation={[-Math.PI/2, 0, 0]} receiveShadow material={balconyMat}>
           <planeGeometry args={[width, balconyDepth]} />
-          <meshStandardMaterial color="#475569" roughness={1.0} />
         </mesh>
         
-        {/* Railing */}
-        <mesh position={[0, 0.6, -depth/2 - bathDepth - balconyDepth]} receiveShadow castShadow>
-          <boxGeometry args={[width, 1.2, 0.02]} />
-          <meshStandardMaterial color="#94a3b8" transparent opacity={0.4} />
-        </mesh>
+        {/* Railing (Modern Architectural Glass & Steel Railing) */}
+        <group position={[0, 0, -depth/2 - bathDepth - balconyDepth]}>
+          {/* Top Handrail */}
+          <mesh position={[0, 1.1, 0]} castShadow receiveShadow>
+            <boxGeometry args={[width, 0.05, 0.05]} />
+            <meshStandardMaterial color="#1e293b" roughness={0.3} metalness={0.8} />
+          </mesh>
+          {/* Bottom rail */}
+          <mesh position={[0, 0.1, 0]} castShadow receiveShadow>
+            <boxGeometry args={[width, 0.04, 0.03]} />
+            <meshStandardMaterial color="#1e293b" roughness={0.3} metalness={0.8} />
+          </mesh>
+          {/* Support Posts */}
+          {[-width/2 + 0.1, -width/4, 0, width/4, width/2 - 0.1].map((x, idx) => (
+            <mesh key={idx} position={[x, 0.6, 0]} castShadow>
+              <cylinderGeometry args={[0.02, 0.02, 1.0, 8]} />
+              <meshStandardMaterial color="#334155" roughness={0.2} metalness={0.9} />
+            </mesh>
+          ))}
+          {/* Glass Panels */}
+          <mesh position={[0, 0.6, 0]}>
+            <boxGeometry args={[width - 0.2, 0.9, 0.015]} />
+            <meshPhysicalMaterial 
+              color="#e2e8f0" 
+              transparent 
+              opacity={0.25} 
+              roughness={0.1} 
+              metalness={0.1}
+              transmission={0.9}
+              ior={1.5}
+            />
+          </mesh>
+        </group>
       </group>
     </group>
   );
