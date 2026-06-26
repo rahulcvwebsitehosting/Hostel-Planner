@@ -15,39 +15,75 @@ class TextureManager {
       canvas.height = 512;
       const ctx = canvas.getContext('2d')!;
       
-      // Warm Oak base
-      ctx.fillStyle = '#bfa17a';
+      // Elegant natural honey-oak base tone for high-end designer furniture
+      ctx.fillStyle = '#ccaa85';
       ctx.fillRect(0, 0, 512, 512);
       
-      // Grain lines
-      ctx.strokeStyle = '#7c5e3d';
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.25;
-      for (let i = -100; i < 612; i += 4) {
+      // Gentle background tone bands for authentic wood species variation
+      for (let i = 0; i < 10; i++) {
+        ctx.fillStyle = '#bf9d78';
+        ctx.globalAlpha = 0.2;
+        ctx.fillRect(0, i * 51.2, 512, 25 + Math.random() * 20);
+      }
+      
+      // Layer 1: Long flowing organic wood grain waves
+      ctx.strokeStyle = '#85623e';
+      ctx.lineWidth = 1.25;
+      ctx.globalAlpha = 0.35;
+      for (let i = -60; i < 572; i += 12) {
         ctx.beginPath();
         let x = 0;
         ctx.moveTo(x, i);
         while (x <= 512) {
-          const y = i + Math.sin(x * 0.012) * 8 + Math.cos(x * 0.004) * 18;
+          const y = i + Math.sin(x * 0.015) * 10 + Math.cos(x * 0.005) * 20 + (Math.sin(i * 0.08) * 6);
           ctx.lineTo(x, y);
-          x += 20;
+          x += 16;
         }
         ctx.stroke();
       }
       
-      // Knots
-      ctx.fillStyle = '#563e26';
-      ctx.globalAlpha = 0.06;
-      const knots = [[120, 150], [380, 290], [200, 420]];
+      // Layer 2: Micro-hairline secondary grain fibers for extreme wood detail
+      ctx.strokeStyle = '#684a2d';
+      ctx.lineWidth = 0.6;
+      ctx.globalAlpha = 0.2;
+      for (let i = -20; i < 532; i += 6) {
+        ctx.beginPath();
+        let x = 0;
+        ctx.moveTo(x, i);
+        while (x <= 512) {
+          const y = i + Math.sin(x * 0.02) * 5 + Math.cos(x * 0.003) * 14;
+          ctx.lineTo(x, y);
+          x += 24;
+        }
+        ctx.stroke();
+      }
+      
+      // Layer 3: Natural concentric oak knots for an authentic organic wood appearance
+      const knots = [[140, 110], [390, 250], [210, 430]];
+      ctx.strokeStyle = '#5c3f25';
+      ctx.lineWidth = 1.0;
       for (const [kx, ky] of knots) {
-        for (let r = 8; r < 70; r += 6) {
+        ctx.globalAlpha = 0.25;
+        // Outer rings warped organically around the knot
+        for (let r = 8; r < 60; r += 10) {
           ctx.beginPath();
-          ctx.arc(kx, ky, r, 0, Math.PI * 2);
+          ctx.ellipse(kx, ky, r, r * 0.48, Math.PI / 15, 0, Math.PI * 2);
           ctx.stroke();
         }
+        // Darkened core center of the knot
+        ctx.fillStyle = '#452b14';
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, 6, 3, Math.PI / 15, 0, Math.PI * 2);
+        ctx.fill();
       }
       
       const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) {
+        (tex as any).colorSpace = THREE.SRGBColorSpace;
+      } else {
+        (tex as any).encoding = 3001; // THREE.sRGBEncoding
+      }
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       this.textures.wood = tex;
@@ -59,35 +95,89 @@ class TextureManager {
     const key = `fabric_${color}`;
     if (!this.textures[key]) {
       const canvas = document.createElement('canvas');
-      canvas.width = 128;
-      canvas.height = 128;
+      canvas.width = 256;
+      canvas.height = 256;
       const ctx = canvas.getContext('2d')!;
       
+      // Solid base tone
       ctx.fillStyle = color;
-      ctx.fillRect(0, 0, 128, 128);
+      ctx.fillRect(0, 0, 256, 256);
       
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 0.5;
+      // Design highlight/shadow weave overlay parameters
+      const shadowColor = '#000000';
+      const highlightColor = '#ffffff';
+      ctx.lineWidth = 0.8;
       
-      // Cross weave pattern
-      ctx.globalAlpha = 0.07;
-      for (let y = 0; y < 128; y += 3) {
+      // Horizontal weft threads
+      for (let y = 0; y < 256; y += 4) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(128, y);
+        ctx.lineTo(256, y);
+        ctx.strokeStyle = shadowColor;
+        ctx.globalAlpha = 0.08;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(0, y + 2);
+        ctx.lineTo(256, y + 2);
+        ctx.strokeStyle = highlightColor;
+        ctx.globalAlpha = 0.05;
         ctx.stroke();
       }
-      for (let x = 0; x < 128; x += 3) {
+      
+      // Vertical warp threads
+      for (let x = 0; x < 256; x += 4) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, 128);
+        ctx.lineTo(x, 256);
+        ctx.strokeStyle = shadowColor;
+        ctx.globalAlpha = 0.08;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(x + 2, 0);
+        ctx.lineTo(x + 2, 256);
+        ctx.strokeStyle = highlightColor;
+        ctx.globalAlpha = 0.05;
+        ctx.stroke();
+      }
+      
+      // Soft organic irregular linen slubs (thickening threads for natural fabric look)
+      ctx.strokeStyle = highlightColor;
+      ctx.globalAlpha = 0.12;
+      for (let i = 0; i < 20; i++) {
+        const y = Math.random() * 256;
+        const xStart = Math.random() * 120;
+        const length = 45 + Math.random() * 90;
+        ctx.lineWidth = 1.3 + Math.random() * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(xStart, y);
+        ctx.lineTo(xStart + length, y + (Math.random() - 0.5) * 2);
+        ctx.stroke();
+      }
+      
+      ctx.strokeStyle = shadowColor;
+      ctx.globalAlpha = 0.1;
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * 256;
+        const yStart = Math.random() * 120;
+        const length = 45 + Math.random() * 90;
+        ctx.lineWidth = 1.3 + Math.random() * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(x, yStart);
+        ctx.lineTo(x + (Math.random() - 0.5) * 2, yStart + length);
         ctx.stroke();
       }
       
       const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) {
+        (tex as any).colorSpace = THREE.SRGBColorSpace;
+      } else {
+        (tex as any).encoding = 3001; // THREE.sRGBEncoding
+      }
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(8, 8);
+      tex.repeat.set(4, 4);
       this.textures[key] = tex;
     }
     return this.textures[key];
@@ -100,21 +190,47 @@ class TextureManager {
       canvas.height = 256;
       const ctx = canvas.getContext('2d')!;
       
-      ctx.fillStyle = '#94a3b8';
+      // Soft brushed titanium / stainless steel slate metal base
+      ctx.fillStyle = '#8e9aa8';
       ctx.fillRect(0, 0, 256, 256);
       
-      // Fine brushed lines
+      // Layer 1: Fine industrial micro-brushed vertical scratches
       ctx.strokeStyle = '#cbd5e1';
       ctx.lineWidth = 0.5;
-      ctx.globalAlpha = 0.2;
-      for (let i = 0; i < 400; i++) {
+      ctx.globalAlpha = 0.25;
+      for (let i = 0; i < 350; i++) {
+        const x = Math.random() * 256;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, 256);
+        ctx.stroke();
+      }
+      
+      // Layer 2: Subtle horizontal carbon burnishing
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 0.6;
+      ctx.globalAlpha = 0.15;
+      for (let i = 0; i < 150; i++) {
         const y = Math.random() * 256;
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(256, y);
         ctx.stroke();
       }
+      
+      // Layer 3: Noise speckles to simulate real surface imperfections
+      ctx.fillStyle = '#f1f5f9';
+      ctx.globalAlpha = 0.12;
+      for (let i = 0; i < 5000; i++) {
+        ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.0, 1.0);
+      }
+      
       const tex = new THREE.CanvasTexture(canvas);
+      if ('colorSpace' in tex) {
+        (tex as any).colorSpace = THREE.SRGBColorSpace;
+      } else {
+        (tex as any).encoding = 3001; // THREE.sRGBEncoding
+      }
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       this.textures.steel = tex;
@@ -690,10 +806,24 @@ const BunkBedDetailedModel: React.FC<{ width: number; depth: number; baseMat: TH
         <boxGeometry args={[width - 0.16, 0.08, 0.3]} />
       </mesh>
       {/* Folded colorful blankets */}
-      <mesh position={[0, 0.54, -depth / 4]} castShadow material={new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.85 })}>
+      <mesh position={[0, 0.54, -depth / 4]} castShadow material={useMemo(() => new THREE.MeshPhysicalMaterial({
+        color: '#ffffff',
+        map: TextureManager.getFabricTexture('#3b82f6'),
+        roughness: 0.9,
+        sheen: 0.8,
+        sheenColor: '#93c5fd',
+        sheenRoughness: 0.4
+      }), [depth, width])}>
         <boxGeometry args={[width - 0.03, 0.03, depth / 2]} />
       </mesh>
-      <mesh position={[0, 1.44, -depth / 4]} castShadow material={new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.85 })}>
+      <mesh position={[0, 1.44, -depth / 4]} castShadow material={useMemo(() => new THREE.MeshPhysicalMaterial({
+        color: '#ffffff',
+        map: TextureManager.getFabricTexture('#f59e0b'),
+        roughness: 0.9,
+        sheen: 0.8,
+        sheenColor: '#fde047',
+        sheenRoughness: 0.4
+      }), [depth, width])}>
         <boxGeometry args={[width - 0.03, 0.03, depth / 2]} />
       </mesh>
       {/* Sturdy ladder mount */}
@@ -729,14 +859,16 @@ export const FurnitureModel: React.FC<ModelProps> = ({ type, selected, hasCollis
   const baseMat = useMemo(() => {
     const baseColor = hasCollision ? '#ef4444' : (selected ? '#3b82f6' : data.color);
     if (isRealistic) {
+      const isSteel = type === 'BERO' || type === 'BUNKER_BED' || type === 'CHAIR' || type === 'FAN' || type === 'SHOWER';
       return new THREE.MeshPhysicalMaterial({
         color: baseColor,
-        map: type === 'BERO' ? steelTexture : undefined,
-        metalness: type === 'BERO' || type === 'BUNKER_BED' ? 0.75 : 0.1,
-        roughness: type === 'BERO' ? 0.25 : 0.45,
-        clearcoat: type === 'BERO' ? 0.2 : 0.05,
+        map: isSteel ? steelTexture : undefined,
+        metalness: isSteel ? 0.85 : 0.1,
+        roughness: isSteel ? 0.32 : 0.5,
+        clearcoat: isSteel ? 0.4 : 0.05,
         clearcoatRoughness: 0.15,
-        envMapIntensity: 1.4,
+        reflectivity: isSteel ? 0.85 : 0.2,
+        envMapIntensity: 1.8,
       });
     }
     return new THREE.MeshStandardMaterial({

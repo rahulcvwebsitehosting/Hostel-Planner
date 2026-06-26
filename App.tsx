@@ -22,9 +22,8 @@ interface ChatMessage {
 }
 
 const FixedFixtures = memo(({ mode }: { mode: AppMode }) => {
-  if (mode === 'edit') return null;
   const isPov = mode === 'pov';
-  const isRealistic = mode === 'view' || mode === 'pov';
+  const isRealistic = mode === 'view' || mode === 'pov' || mode === 'edit';
   
   return (
     <group>
@@ -1513,14 +1512,6 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
         {/* Partition Wall */}
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
-        
-        {/* Sliding Glass Partition Door */}
-        <SlidingGlassDoor 
-          height={height} 
-          gapWidth={1.2} 
-          zPosition={-depth/2} 
-          isRealistic={mode === 'view' || mode === 'pov'} 
-        />
         
         {/* Sleek architectural HVAC Ventilation Grille near top left of the partition wall */}
         <group position={[-1.8, height - 0.25, -depth / 2 + wallThickness / 2 + 0.01]}>
