@@ -137,9 +137,11 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
   const velocity = useRef(new THREE.Vector3());
   const direction = useRef(new THREE.Vector3());
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), []);
+  const lastPos = useRef({ x: 0, y: 0 });
 
-  // Reset camera orientation on mount to look straight forward into the room (-Z direction)
+  // Reset camera orientation and position on mount to look straight forward into the room (-Z direction)
   useEffect(() => {
+    camera.position.set(0, 1.65, 1.0);
     camera.rotation.set(0, 0, 0);
     camera.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
     euler.set(0, 0, 0);
@@ -162,8 +164,6 @@ const POVControls = ({ joystickVector, isFlying }: { joystickVector: { x: number
       if (e.code === 'Space') moveState.current.up = false;
       if (e.code === 'ShiftLeft') moveState.current.down = false;
     };
-    
-    const lastPos = useRef({ x: 0, y: 0 });
 
     const onPointerDown = (e: PointerEvent) => { 
       isPointerDown.current = true; 
@@ -378,6 +378,12 @@ export default function App() {
     }
   }, [chatMessages]);
 
+  useEffect(() => {
+    if (state.mode === 'pov') {
+      setShowPOVOverlay(true);
+    }
+  }, [state.mode]);
+
   const getEffectiveDims = useCallback((type: FurnitureType, rotation: number) => {
     const itemData = FURNITURE_DATA[type];
     if (!itemData) return { w: 0, d: 0 };
@@ -537,7 +543,13 @@ OUTPUT FORMAT:
 
   const enterPOV = () => {
     const canvas = document.querySelector('canvas');
-    if (canvas) canvas.requestPointerLock();
+    if (canvas) {
+      try {
+        canvas.requestPointerLock();
+      } catch (e) {
+        console.warn('Pointer lock failed, falling back to mouse/touch drag to look around.', e);
+      }
+    }
     setShowPOVOverlay(false);
   };
 
@@ -694,33 +706,67 @@ OUTPUT FORMAT:
           </>
         )}
 
-        <Canvas gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}>
-          <color attach="background" args={["#000000"]} />
+        <Canvas shadows gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.15 }}>
+          <color attach="background" args={["#0a0a0a"]} />
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
+          
+          <PerspectiveCamera 
+            makeDefault 
+            key={state.mode === 'pov' ? 'pov-cam' : 'edit-cam'}
+            {...(state.mode === 'pov' ? {} : { position: state.is2D ? [0, 15, 0] : [9, 13, 11] })}
+            fov={state.mode === 'pov' ? 60 : (state.is2D ? 25 : 22)} 
+          />
+
           {state.mode === 'pov' ? (
-            <><PerspectiveCamera makeDefault position={[0, 1.65, 1.0]} fov={60} /><POVControls joystickVector={joystickVector} isFlying={isFlying} /></>
+            <POVControls joystickVector={joystickVector} isFlying={isFlying} />
           ) : (
-            <>
-              <PerspectiveCamera 
-                makeDefault 
-                position={state.is2D ? [0, 15, 0] : [9, 13, 11]} 
-                fov={state.is2D ? 25 : 22} 
-              />
-              <OrbitControls 
-                enabled={!isDraggingAny} 
-                enableRotate={!state.is2D} 
-                minPolarAngle={Math.PI / 4.5}
-                maxPolarAngle={Math.PI / 2.15} 
-                minDistance={5} 
-                maxDistance={35} 
-                target={[0, 0.5, -0.8]} 
-              />
-            </>
+            <OrbitControls 
+              enabled={!isDraggingAny} 
+              enableRotate={!state.is2D} 
+              minPolarAngle={Math.PI / 4.5}
+              maxPolarAngle={Math.PI / 2.15} 
+              minDistance={5} 
+              maxDistance={35} 
+              target={[0, 0.5, -0.8]} 
+            />
           )}
           
-          <ambientLight intensity={state.mode === 'edit' ? 2.2 : 2.0} />
-          <directionalLight position={[8, 16, 12]} intensity={0.6} />
+          {/* Realism-enhancing lighting structure */}
+          <ambientLight intensity={state.mode === 'edit' ? 1.2 : 0.3} />
+          
+          {/* Main directional light mimicking soft daylight from the window/balcony side */}
+          <directionalLight 
+            position={[10, 15, 8]} 
+            intensity={state.mode === 'edit' ? 0.8 : 1.6} 
+            castShadow={state.mode !== 'edit'}
+            shadow-mapSize={[2048, 2048]} 
+            shadow-bias={-0.0001} 
+          />
+          
+          {/* Warm Bedroom Overhead Light Fixture */}
+          <pointLight 
+            position={[0, 2.6, 0]} 
+            intensity={state.mode === 'edit' ? 0.4 : 1.8} 
+            distance={8} 
+            decay={1.6} 
+            color="#ffe4e6" // warm rose tint
+            castShadow={state.mode !== 'edit'}
+            shadow-mapSize={[1024, 1024]}
+            shadow-bias={-0.0001}
+          />
+          
+          {/* Crisp Bathroom Overhead Light Fixture */}
+          <pointLight 
+            position={[0, 2.6, -2.4]} 
+            intensity={state.mode === 'edit' ? 0.3 : 1.4} 
+            distance={6} 
+            decay={1.6} 
+            color="#e0f2fe" // modern light-blue tint
+            castShadow={state.mode !== 'edit'}
+            shadow-mapSize={[1024, 1024]}
+            shadow-bias={-0.0001}
+          />
           
           <Environment resolution={256}>
             <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -5]} scale={[10, 10, 1]} />
