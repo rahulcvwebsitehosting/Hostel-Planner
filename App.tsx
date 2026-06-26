@@ -825,23 +825,90 @@ const EntranceDoor = memo(({ wallThickness, height, gapWidth, zPosition, isReali
     canvas.width = 256;
     canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
-    // Warm rich oak/walnut base matching luxury wood door in the reference
-    ctx.fillStyle = '#84563c';
-    ctx.fillRect(0, 0, 256, 512);
-    ctx.strokeStyle = '#53321e';
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.45;
-    for (let i = 0; i < 512; i += 8) {
-      ctx.beginPath();
-      let x = 0;
-      ctx.moveTo(x, i);
-      while (x <= 256) {
-        ctx.lineTo(x, i + Math.sin(x * 0.03) * 6);
-        x += 15;
+    
+    // Luxury vertical wooden slats configuration
+    const numSlats = 4;
+    const slatWidth = 256 / numSlats; // 64px per vertical slat
+    
+    // Rich architectural walnut palette
+    const walnutTones = [
+      '#7a4d2e', // Warm walnut medium
+      '#643c21', // Deep walnut
+      '#8c5837', // Light walnut
+      '#533118', // Rich dark walnut
+    ];
+    
+    for (let s = 0; s < numSlats; s++) {
+      const xStart = s * slatWidth;
+      const seed = Math.abs(Math.sin(s * 74.3));
+      const slatColor = walnutTones[Math.floor(seed * walnutTones.length)];
+      
+      // Slat background fill
+      ctx.fillStyle = slatColor;
+      ctx.fillRect(xStart, 0, slatWidth, 512);
+      
+      // Beautiful vertical organic wood grain curves
+      ctx.strokeStyle = '#321c0b';
+      ctx.globalAlpha = 0.22 + (seed * 0.1);
+      ctx.lineWidth = 1.0 + (seed * 0.6);
+      
+      const numGrains = 5;
+      for (let g = 0; g < numGrains; g++) {
+        ctx.beginPath();
+        let gy = 0;
+        const gxCenter = xStart + (g + 0.5) * (slatWidth / numGrains) + (Math.sin(g * 11.2) * 6);
+        ctx.moveTo(gxCenter, gy);
+        
+        const freq = 0.012 + (g * 0.003);
+        const amp = 3 + (seed * 5);
+        
+        while (gy <= 512) {
+          const gx = gxCenter + Math.sin(gy * freq) * amp + Math.cos(gy * 0.002) * (amp / 2);
+          if (gx >= xStart && gx <= xStart + slatWidth) {
+            ctx.lineTo(gx, gy);
+          }
+          gy += 20;
+        }
+        ctx.stroke();
       }
+      
+      // Soft walnut grain knots (35% chance per vertical pane)
+      if (seed > 0.6) {
+        const knotY = 100 + seed * 300;
+        const knotX = xStart + slatWidth * (0.3 + seed * 0.4);
+        ctx.strokeStyle = '#271407';
+        ctx.globalAlpha = 0.32;
+        ctx.lineWidth = 1.0;
+        for (let k = 1; k <= 3; k++) {
+          ctx.beginPath();
+          ctx.ellipse(knotX, knotY, k * 4, k * 8, Math.PI / 8 * (seed - 0.5), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+    
+    // Deep, dark vertical slat joint grooves for luxurious panel definition
+    ctx.strokeStyle = '#221105';
+    ctx.lineWidth = 3.5;
+    ctx.globalAlpha = 0.95;
+    for (let x = 0; x <= 256; x += slatWidth) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
       ctx.stroke();
     }
+    
+    // Subtle outer designer edge border
+    ctx.strokeStyle = '#180c03';
+    ctx.lineWidth = 4.0;
+    ctx.strokeRect(0, 0, 256, 512);
+    
     const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) {
+      (tex as any).colorSpace = THREE.SRGBColorSpace;
+    } else {
+      (tex as any).encoding = 3001; // THREE.sRGBEncoding
+    }
     return tex;
   }, []);
 
@@ -1050,20 +1117,44 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
   // Custom high fidelity textures for floors and walls
   const wallTexture = useMemo(() => {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 512;
+    canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.fillStyle = '#cbd5e1';
-    ctx.globalAlpha = 0.12;
-    for (let i = 0; i < 4000; i++) {
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.2, 1.2);
+    
+    // Luxurious natural off-white matte plaster base color
+    ctx.fillStyle = '#faf9f6';
+    ctx.fillRect(0, 0, 512, 512);
+    
+    // Layer 1: Ultra-fine light cream stipple noise for texture depth
+    ctx.fillStyle = '#f1ece3';
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 20000; i++) {
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.2, 1.2);
     }
+    
+    // Layer 2: Medium warm gray-beige stipple noise for subtle shadowing
+    ctx.fillStyle = '#e2dfd5';
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 15000; i++) {
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.0, 1.0);
+    }
+
+    // Layer 3: Soft crisp white highlight specs
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.6;
+    for (let i = 0; i < 12000; i++) {
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.5, 1.5);
+    }
+    
     const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) {
+      (tex as any).colorSpace = THREE.SRGBColorSpace;
+    } else {
+      (tex as any).encoding = 3001; // THREE.sRGBEncoding
+    }
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(4, 4);
+    tex.repeat.set(3, 3);
     return tex;
   }, []);
 
@@ -1073,59 +1164,124 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
     canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
     
-    // Extremely light desaturated cream/ash-wood base color matching the reference photo
-    ctx.fillStyle = '#f4efe6';
-    ctx.fillRect(0, 0, 1024, 1024);
+    const rowHeight = 128; // 8 rows total
     
-    // Board Joint lines - extremely soft desaturated beige
-    ctx.strokeStyle = '#dfd5c8';
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.6;
-    const plankHeight = 128;
-    for (let y = 0; y <= 1024; y += plankHeight) {
+    // Modern natural oak multi-tone palette
+    const oakTones = [
+      '#e1d0b7', // Warm sandy oak
+      '#ebdcb9', // Soft honey oak
+      '#dfcdb2', // Classic oak
+      '#ebd4b5', // Light golden oak
+      '#decba9', // Rich warm oak
+      '#dec2a1', // Antique oak tone
+      '#ebd9be', // Creamy maple-oak
+      '#dfcaac', // Pale beach wood
+    ];
+    
+    // Draw each plank individually to get beautiful stagger and tone differences!
+    for (let r = 0; r < 8; r++) {
+      const yStart = r * rowHeight;
+      let xStart = -(r % 3) * 160; // staggered offset
+      
+      while (xStart < 1024) {
+        // Consistent pseudo-randomized plank width and color selection based on coordinates
+        const seedValue = Math.abs(Math.sin(r * 12.3 + xStart * 0.05));
+        const plankWidth = 320 + Math.floor(seedValue * 220);
+        const toneIndex = Math.floor(seedValue * oakTones.length);
+        const plankColor = oakTones[toneIndex];
+        
+        const drawX = Math.max(0, xStart);
+        const drawW = Math.min(plankWidth - (drawX - xStart), 1024 - drawX);
+        
+        if (drawW > 0) {
+          // Fill plank with individual wood tone
+          ctx.fillStyle = plankColor;
+          ctx.fillRect(drawX, yStart, drawW, rowHeight);
+          
+          // Draw horizontal wavy organic wood grain lines
+          ctx.strokeStyle = '#9f7d54';
+          ctx.globalAlpha = 0.18 + (seedValue * 0.12);
+          ctx.lineWidth = 1.0 + (seedValue * 0.6);
+          
+          const numGrains = 4 + Math.floor(seedValue * 4);
+          for (let g = 0; g < numGrains; g++) {
+            ctx.beginPath();
+            let gx = drawX;
+            const gyCenter = yStart + (g + 0.5) * (rowHeight / numGrains) + (Math.sin(g + xStart) * 12);
+            ctx.moveTo(gx, gyCenter);
+            
+            const freq = 0.006 + (g * 0.002);
+            const amp = 4 + (seedValue * 8);
+            
+            while (gx <= drawX + drawW) {
+              const gy = gyCenter + Math.sin((gx - xStart) * freq) * amp + Math.cos((gx - xStart) * 0.002) * (amp / 2);
+              if (gy >= yStart && gy <= yStart + rowHeight) {
+                ctx.lineTo(gx, gy);
+              }
+              gx += 20;
+            }
+            ctx.stroke();
+          }
+          
+          // Draw organic wood knots (25% chance per plank)
+          if (seedValue > 0.75 && drawW > 120) {
+            const knotX = drawX + drawW * 0.4;
+            const knotY = yStart + rowHeight * (0.3 + (seedValue * 0.4));
+            if (knotX > 0 && knotX < 1024) {
+              ctx.strokeStyle = '#825f38';
+              ctx.globalAlpha = 0.28;
+              ctx.lineWidth = 1.2;
+              for (let k = 1; k <= 3; k++) {
+                ctx.beginPath();
+                ctx.ellipse(knotX, knotY, k * 8, k * 4, Math.PI / 15 * (seedValue - 0.5), 0, Math.PI * 2);
+                ctx.stroke();
+              }
+            }
+          }
+        }
+        xStart += plankWidth;
+      }
+    }
+    
+    // Draw crisp, dark micro-grooves/joints between floor boards
+    ctx.strokeStyle = '#5a432b'; // Deep elegant wood joint color
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 2.0;
+    
+    // Horizontal joints
+    for (let y = 0; y <= 1024; y += rowHeight) {
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(1024, y);
       ctx.stroke();
     }
     
-    for (let i = 0; i < 8; i++) {
-      const y = i * plankHeight;
-      ctx.beginPath();
-      const offset = (i % 2) * 256;
-      for (let x = offset; x <= 1024; x += 512) {
-        ctx.moveTo(x, y);
-        ctx.lineTo(x, y + plankHeight);
-      }
-      ctx.stroke();
-    }
-    
-    // Soft subtle wood grain layers
-    ctx.strokeStyle = '#e8dfd3';
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.4;
+    // Vertical joints
     for (let r = 0; r < 8; r++) {
-      const startY = r * plankHeight;
-      for (let l = 0; l < 10; l++) {
-        ctx.beginPath();
-        let x = 0;
-        const yShift = startY + Math.random() * plankHeight;
-        ctx.moveTo(x, yShift);
-        while (x <= 1024) {
-          const y = yShift + Math.sin(x * 0.015) * 3 + Math.cos(x * 0.005) * 8;
-          if (y >= startY && y <= startY + plankHeight) {
-            ctx.lineTo(x, y);
-          }
-          x += 35;
+      const yStart = r * rowHeight;
+      let xStart = -(r % 3) * 160;
+      while (xStart < 1024) {
+        const seedValue = Math.abs(Math.sin(r * 12.3 + xStart * 0.05));
+        const plankWidth = 320 + Math.floor(seedValue * 220);
+        if (xStart > 0 && xStart < 1024) {
+          ctx.beginPath();
+          ctx.moveTo(xStart, yStart);
+          ctx.lineTo(xStart, yStart + rowHeight);
+          ctx.stroke();
         }
-        ctx.stroke();
+        xStart += plankWidth;
       }
     }
     
     const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) {
+      (tex as any).colorSpace = THREE.SRGBColorSpace;
+    } else {
+      (tex as any).encoding = 3001; // THREE.sRGBEncoding
+    }
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(2, 2);
+    tex.repeat.set(1.5, 1.5);
     return tex;
   }, []);
 
@@ -1135,27 +1291,75 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
     canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
     
-    // Light, pristine, architectural off-white tiles
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 0, 512, 512);
+    // Luxury dark slate/charcoal stone color palette
+    const tileTones = [
+      '#212529', // Midnight charcoal
+      '#2b2f35', // Deep cool slate
+      '#1b1e22', // Dark obsidian
+      '#30353d', // Textured graphite
+      '#262a30', // Deep mineral grey
+    ];
     
-    // Extremely subtle organic noise
-    ctx.fillStyle = '#e2e8f0';
-    ctx.globalAlpha = 0.08;
-    for (let i = 0; i < 150; i++) {
-      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.5, 1.5);
+    // Draw a 4x4 grid of gorgeous, realistic dark slate tiles
+    const tileSize = 128;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        const tx = c * tileSize;
+        const ty = r * tileSize;
+        const seed = Math.abs(Math.sin(r * 35.7 + c * 19.3));
+        const tileColor = tileTones[Math.floor(seed * tileTones.length)];
+        
+        // Base fill
+        ctx.fillStyle = tileColor;
+        ctx.fillRect(tx, ty, tileSize, tileSize);
+        
+        // Stone texture: organic fine noise and mottled spots
+        ctx.fillStyle = '#0f1115';
+        ctx.globalAlpha = 0.25;
+        for (let i = 0; i < 40; i++) {
+          ctx.fillRect(tx + Math.random() * tileSize, ty + Math.random() * tileSize, 2, 2);
+        }
+        
+        ctx.fillStyle = '#535b68';
+        ctx.globalAlpha = 0.15;
+        for (let i = 0; i < 20; i++) {
+          ctx.fillRect(tx + Math.random() * tileSize, ty + Math.random() * tileSize, 3, 3);
+        }
+        
+        // Elegant marble-like diagonal quartz veins
+        ctx.strokeStyle = '#64748b';
+        ctx.globalAlpha = 0.25;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(tx + (seed * 40), ty);
+        ctx.lineTo(tx + tileSize, ty + tileSize - (seed * 40));
+        ctx.stroke();
+        
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.globalAlpha = 0.12;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty + tileSize * 0.4 + (seed * 30));
+        ctx.lineTo(tx + tileSize * 0.6 + (seed * 30), ty + tileSize);
+        ctx.stroke();
+      }
     }
     
-    // Precise, delicate grout lines
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 2;
+    // Crisp, contrasting light cool grey grout lines
+    ctx.strokeStyle = '#94a3b8'; // Elegant light blue-grey grout
     ctx.globalAlpha = 0.85;
-    for (let x = 0; x <= 512; x += 128) {
+    ctx.lineWidth = 2.5;
+    for (let x = 0; x <= 512; x += tileSize) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 512); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(512, x); ctx.stroke();
     }
     
     const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) {
+      (tex as any).colorSpace = THREE.SRGBColorSpace;
+    } else {
+      (tex as any).encoding = 3001; // THREE.sRGBEncoding
+    }
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(1.5, 1.5);
@@ -1195,15 +1399,50 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
     canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
     
-    // Modern charcoal-grey wood composite decking planks
-    ctx.fillStyle = '#2d3748';
-    ctx.fillRect(0, 0, 512, 512);
+    const numPlanks = 12;
+    const spacing = 512 / numPlanks; // ~42.6px per plank
     
-    // Add linear decking lines (vertical planks)
-    ctx.strokeStyle = '#1a202c';
-    ctx.lineWidth = 4;
-    ctx.globalAlpha = 0.85;
-    const spacing = 42;
+    // Modern charcoal-grey wood composite decking board colors
+    const compositeTones = [
+      '#232832', // Deep graphite composite
+      '#2b313d', // Slate composite
+      '#1c1f27', // Deep basalt composite
+      '#323a48', // Mineral charcoal composite
+    ];
+    
+    for (let p = 0; p < numPlanks; p++) {
+      const xStart = p * spacing;
+      const seed = Math.abs(Math.sin(p * 45.2));
+      const boardColor = compositeTones[Math.floor(seed * compositeTones.length)];
+      
+      // Paint individual composite decking board
+      ctx.fillStyle = boardColor;
+      ctx.fillRect(xStart, 0, spacing, 512);
+      
+      // Vertical straight composite linear grain lines
+      ctx.strokeStyle = '#181b21';
+      ctx.globalAlpha = 0.25;
+      ctx.lineWidth = 1.0;
+      for (let g = 0; g < 3; g++) {
+        const gx = xStart + (g + 1) * (spacing / 4);
+        ctx.beginPath();
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, 512);
+        ctx.stroke();
+      }
+      
+      // Extremely subtle vertical composite fiber flecks
+      ctx.fillStyle = '#4a5568';
+      ctx.globalAlpha = 0.15;
+      for (let f = 0; f < 30; f++) {
+        ctx.fillRect(xStart + Math.random() * spacing, Math.random() * 512, 1.2, 3);
+      }
+    }
+    
+    // Deep black gaps/recesses between decking boards
+    ctx.strokeStyle = '#0f1115';
+    ctx.lineWidth = 3.5;
+    ctx.globalAlpha = 0.95;
     for (let x = 0; x <= 512; x += spacing) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -1211,21 +1450,15 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
       ctx.stroke();
     }
     
-    // Subtle wood composite grain texture on planks
-    ctx.strokeStyle = '#3d4a5d';
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.25;
-    for (let i = 0; i < 512; i += 3) {
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(512, i);
-      ctx.stroke();
-    }
-    
     const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) {
+      (tex as any).colorSpace = THREE.SRGBColorSpace;
+    } else {
+      (tex as any).encoding = 3001; // THREE.sRGBEncoding
+    }
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(4, 2);
+    tex.repeat.set(2, 1.5);
     return tex;
   }, []);
 
@@ -1280,6 +1513,14 @@ const RoomStructure = memo(({ config, showGrid, onDeselect, theme, mode }: { con
         {/* Partition Wall */}
         <mesh position={[- (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
         <mesh position={[ (width/2 - 2.9/2), height/2, -depth/2]} receiveShadow castShadow material={wallMat}><boxGeometry args={[2.9, height, wallThickness]} /></mesh>
+        
+        {/* Sliding Glass Partition Door */}
+        <SlidingGlassDoor 
+          height={height} 
+          gapWidth={1.2} 
+          zPosition={-depth/2} 
+          isRealistic={mode === 'view' || mode === 'pov'} 
+        />
         
         {/* Sleek architectural HVAC Ventilation Grille near top left of the partition wall */}
         <group position={[-1.8, height - 0.25, -depth / 2 + wallThickness / 2 + 0.01]}>
