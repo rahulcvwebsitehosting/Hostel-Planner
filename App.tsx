@@ -723,11 +723,10 @@ OUTPUT FORMAT:
             <OrbitControls 
               enabled={!isDraggingAny} 
               enableRotate={!state.is2D} 
-              minPolarAngle={Math.PI / 4.5}
-              maxPolarAngle={Math.PI / 2.15} 
-              minDistance={5} 
-              maxDistance={35} 
+              minDistance={1} 
+              maxDistance={80} 
               target={[0, 0.5, -0.8]} 
+              enablePan={true}
             />
           )}
           
